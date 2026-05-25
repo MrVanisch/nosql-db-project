@@ -591,6 +591,43 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: 8px;
 }
 
+.step-list {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 32px;
+  padding: 0 !important;
+  list-style: none;
+}
+
+.step-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 14px;
+  margin: 0 !important;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fffdf8;
+  box-shadow: var(--shadow-sm);
+}
+
+.step-number {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 900;
+}
+
+.step-card p {
+  margin: 0 0 6px;
+  line-height: 1.65;
+  color: #2c3531;
+}
+
 /* Comments */
 #comments {
   display: grid;

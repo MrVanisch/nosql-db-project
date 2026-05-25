@@ -167,9 +167,18 @@ async function openRecipe(slug) {
         <ul style="margin-bottom: 24px;">
           ${recipe.ingredients.map((item) => `<li><strong>${escapeHtml(item.name)}</strong>: ${item.quantity} ${escapeHtml(item.unit)}</li>`).join("")}
         </ul>
-        <h3>Przygotowanie</h3>
-        <ol style="margin-bottom: 32px;">
-          ${recipe.steps.map((step) => `<li>${escapeHtml(step.instruction)} <span class="muted">(${step.durationMinutes} min)</span></li>`).join("")}</ol>
+        <h3>Przygotowanie krok po kroku</h3>
+        <ol class="step-list">
+          ${recipe.steps.map((step) => `
+            <li class="step-card">
+              <span class="step-number">${step.order}</span>
+              <div>
+                <p>${escapeHtml(step.instruction)}</p>
+                <span class="muted">${step.durationMinutes || 5} min</span>
+              </div>
+            </li>
+          `).join("")}
+        </ol>
         
         <h3 style="border-top: 1px solid var(--line); padding-top: 24px;">Komentarze</h3>
         <div id="comments">

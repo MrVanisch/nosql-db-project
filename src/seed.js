@@ -221,7 +221,6 @@ function generateRecipeCatalog(size = 216) {
   return Array.from({ length: size }, (_, index) => {
     const template = recipeTemplates[index % recipeTemplates.length];
     const variant = variants[Math.floor(index / recipeTemplates.length) % variants.length];
-    const serial = String(index + 1).padStart(3, "0");
     const prepTimeMinutes = 5 + (index % 6) * 5;
     const cookTimeMinutes = template.categorySlug === "desery" ? 20 + (index % 5) * 5 : 10 + (index % 7) * 4;
     const servings = 1 + (index % 6);
@@ -234,20 +233,15 @@ function generateRecipeCatalog(size = 216) {
 
     return {
       categorySlug: template.categorySlug,
-      title: `${template.base} ${variant} ${serial}`,
-      description: `Sprawdzony przepis na ${template.base.toLowerCase()} ${variant}, przygotowany z prostych skladnikow i opisany krok po kroku.`,
+      title: `${template.base} ${variant}`,
+      description: `Dokladnie opisany przepis na ${template.base.toLowerCase()} ${variant}. Zawiera przygotowanie skladnikow, sposob obrobki, doprawianie i podanie, aby danie wyszlo powtarzalnie nawet za pierwszym razem.`,
       ingredients: [
         [template.main, template.unit === "szt" ? 2 + (index % 4) : 120 + (index % 6) * 40, template.unit],
         extra,
         ["przyprawy", 1, "lyzeczka"],
         ["woda lub bulion", 150 + (index % 4) * 50, "ml"],
       ],
-      steps: [
-        "Przygotuj wszystkie skladniki i odmierz potrzebne porcje.",
-        `Polacz skladniki bazowe, aby powstal aromatyczny przepis: ${template.base.toLowerCase()} ${variant}.`,
-        "Gotuj, piecz albo smaz do uzyskania odpowiedniej konsystencji.",
-        "Dopraw do smaku i podawaj od razu po przygotowaniu.",
-      ],
+      steps: buildDetailedSteps(template, variant, prepTimeMinutes, cookTimeMinutes, servings),
       tags: [...template.tags, makeSlug(variant), difficulty],
       diets: template.diets,
       prepTimeMinutes,
@@ -261,6 +255,84 @@ function generateRecipeCatalog(size = 216) {
       imageKey: template.image,
     };
   });
+}
+
+function buildDetailedSteps(template, variant, prepTimeMinutes, cookTimeMinutes, servings) {
+  const base = template.base.toLowerCase();
+  const main = template.main;
+  const commonStart = [
+    `Odmierz skladniki na ${servings} porcje. ${main} przygotuj jako skladnik bazowy: umyj, osusz i pokroj albo rozdrobnij tak, aby kawalki byly podobnej wielkosci.`,
+    `Przygotuj dodatki do wariantu "${variant}": posiekaj cebule lub ziola, odmierz przyprawy, a mokre skladniki trzymaj pod reka. Dzieki temu gotowanie pojdzie bez przerw.`,
+  ];
+
+  const finish = [
+    "Na koniec sprobuj dania i dopraw sola, pieprzem oraz przyprawami. Jesli smak jest zbyt delikatny, dodaj odrobine kwasu, ziol albo ostrej przyprawy.",
+    "Odstaw danie na 2 minuty, aby smaki sie polaczyly. Podawaj cieple, najlepiej z dodatkiem swiezych ziol albo chrupiacego pieczywa.",
+  ];
+
+  const byCategory = {
+    sniadania: [
+      `Rozgrzej patelnie lub rondelek na srednim ogniu. Dodaj skladnik bazowy i mieszaj regularnie, aby nic nie przywarlo ani sie nie przypalilo.`,
+      `Gotuj lub smaz przez okolo ${Math.max(6, cookTimeMinutes)} minut. Masa powinna byc zwarta, ale nadal wilgotna; jezeli gestnieje za szybko, zmniejsz ogien.`,
+    ],
+    obiady: [
+      `Rozgrzej szeroka patelnie albo garnek. Podsmaz skladniki aromatyczne przez 2-3 minuty, potem dodaj ${main} i obsmaz z kazdej strony.`,
+      `Dodaj plyn lub sos i gotuj pod przykryciem przez okolo ${cookTimeMinutes} minut. Mieszaj co kilka minut, a gdy sos za bardzo gestnieje, dolej kilka lyzek wody.`,
+    ],
+    wegetarianskie: [
+      `Rozgrzej oliwe w garnku lub na patelni. Dodaj warzywa i ${main}, po czym podsmazaj 5 minut, az skladniki lekko sie zarumienia.`,
+      `Wlej wode, bulion albo sos i dus przez okolo ${cookTimeMinutes} minut. Danie jest gotowe, gdy warzywa sa miekkie, ale nie rozpadaja sie.`,
+    ],
+    zupy: [
+      `W garnku podsmaz cebule, czosnek i przyprawy przez 2-3 minuty. Dodaj ${main}, zalej bulionem i zagotuj.`,
+      `Gotuj na malym ogniu przez okolo ${cookTimeMinutes} minut. Jesli robisz krem, zblenduj zupe na gladko i dopiero wtedy dopraw do smaku.`,
+    ],
+    salatki: [
+      `Ugotuj albo przygotuj ${main}, a nastepnie przestudz, zeby nie zwiadl delikatnych warzyw. Skladniki pokroj na podobne kawalki.`,
+      `Wymieszaj dressing w osobnej miseczce, polej salatke tuz przed podaniem i delikatnie przemieszaj, aby kazdy skladnik byl pokryty sosem.`,
+    ],
+    kolacje: [
+      `Rozgrzej piekarnik, patelnie albo opiekacz. Przygotuj ${main} i dodatki, a skladniki ukladaj warstwami, zeby kazdy kes mial podobny smak.`,
+      `Podgrzewaj przez okolo ${cookTimeMinutes} minut, az wierzch bedzie lekko chrupiacy, a srodek goracy. Przed krojeniem odczekaj minute.`,
+    ],
+    przekaski: [
+      `Rozgniec, zblenduj albo drobno posiekaj ${main}. Dodawaj plynne skladniki stopniowo, zeby kontrolowac gestosc przekaski.`,
+      `Schlodz paste lub dip przez kilka minut. Jesli przekaska jest za gesta, dodaj lyzke jogurtu, oliwy albo wody i ponownie wymieszaj.`,
+    ],
+    desery: [
+      `Rozgrzej piekarnik albo przygotuj naczynie do chlodzenia. Suche skladniki wymieszaj osobno, mokre osobno, a potem polacz je krotko, tylko do uzyskania jednolitej masy.`,
+      `Piecz, chlodz albo podgrzewaj przez okolo ${cookTimeMinutes} minut. Deser jest gotowy, gdy wierzch sie zetnie, a srodek zachowa wlasciwa konsystencje.`,
+    ],
+  };
+
+  return [
+    ...commonStart,
+    ...(byCategory[template.categorySlug] || byCategory.obiady),
+    `Calkowity czas pracy to okolo ${prepTimeMinutes + cookTimeMinutes} minut. Kontroluj konsystencje: danie nie powinno byc suche ani wodniste.`,
+    ...finish,
+  ];
+}
+
+function expandRecipeSteps(item) {
+  const hasDetailedSteps = item.steps.length >= 5 && item.steps.every((step) => step.length >= 70);
+  if (hasDetailedSteps) return item.steps;
+
+  const ingredients = item.ingredients
+    .slice(0, 4)
+    .map(([name, quantity, unit]) => `${name} (${quantity} ${unit})`)
+    .join(", ");
+
+  return [
+    `Przygotuj stanowisko i odmierz skladniki: ${ingredients}. Produkty umyj, osusz i pokroj przed rozpoczeciem gotowania, zeby kolejne etapy wykonac bez pospiechu.`,
+    ...item.steps.map((step, index) => {
+      const hint = index === 0
+        ? "Utrzymuj srednia temperature i mieszaj, aby skladniki rownomiernie sie ogrzewaly."
+        : "Kontroluj konsystencje oraz zapach; jezeli skladniki zaczynaja przywierac, zmniejsz ogien albo dodaj odrobine wody.";
+      return `${step} ${hint}`;
+    }),
+    `Po wykonaniu glownych etapow sprobuj dania i dopraw je sola, pieprzem albo ziolami. Jesli smak jest za lagodny, dodaj odrobine kwasu, ostrej przyprawy lub tluszczu.`,
+    "Przed podaniem odstaw danie na 2 minuty. Nastepnie przeloz na talerze, dodaj swieze ziola lub wybrany dodatek i podawaj od razu, gdy ma najlepsza temperature.",
+  ];
 }
 
 async function run() {
@@ -286,6 +358,10 @@ async function run() {
   const user = await db.collection("users").findOne({ email: admin.email });
 
   const allRecipes = [...recipes, ...generateRecipeCatalog(216)];
+  await db.collection("recipes").deleteMany({
+    authorId: user._id,
+    title: { $regex: "\\s\\d{3}$" },
+  });
 
   for (const item of allRecipes) {
     const category = await db.collection("categories").findOne({ slug: item.categorySlug });
@@ -298,7 +374,7 @@ async function run() {
       slug: makeSlug(item.title),
       description: item.description,
       ingredients: item.ingredients.map(([name, quantity, unit]) => ({ name, normalizedName: makeSlug(normalizeText(name)), quantity, unit, note: "" })),
-      steps: item.steps.map((instruction, index) => ({ order: index + 1, instruction, durationMinutes: index === 0 ? 8 : 5 })),
+      steps: expandRecipeSteps(item).map((instruction, index) => ({ order: index + 1, instruction, durationMinutes: index === 0 ? 8 : 5 })),
       tags: item.tags.map(makeSlug),
       diets: item.diets.map(makeSlug),
       images: [{ url: images[item.imageKey || item.categorySlug], alt: item.title, isMain: true }],
@@ -313,10 +389,16 @@ async function run() {
       ratingCount: item.ratingCount,
       commentCount: 0,
       favoriteCount: item.favoriteCount,
+      seedSource: "cookflow-demo",
       createdAt,
       updatedAt: createdAt,
     };
-    await db.collection("recipes").updateOne({ slug: document.slug }, { $setOnInsert: document }, { upsert: true });
+    const { createdAt: insertCreatedAt, ...updateDocument } = document;
+    await db.collection("recipes").updateOne(
+      { slug: document.slug },
+      { $set: updateDocument, $setOnInsert: { createdAt: insertCreatedAt } },
+      { upsert: true },
+    );
     for (const slug of document.tags) {
       await db.collection("tags").updateOne(
         { slug },
