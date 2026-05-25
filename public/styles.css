@@ -1050,6 +1050,25 @@ dialog::backdrop {
   overflow: hidden;
 }
 
+.admin-empty {
+  display: grid;
+  gap: 8px;
+  padding: 24px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.admin-empty.error-state {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.admin-empty span {
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .admin-table-head {
   display: flex;
   justify-content: space-between;

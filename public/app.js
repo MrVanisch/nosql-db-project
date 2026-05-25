@@ -19,9 +19,15 @@ async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   const response = await fetch(`/api${path}`, { ...options, headers });
-  const data = await response.json().catch(() => ({}));
+  const contentType = response.headers.get("content-type") || "";
+  const data = contentType.includes("application/json")
+    ? await response.json().catch(() => ({}))
+    : null;
   if (!response.ok) {
-    throw new Error(data.error?.message || "Wystąpił błąd");
+    throw new Error(data?.error?.message || "Wystąpił błąd");
+  }
+  if (!data) {
+    throw new Error(`API ${path} nie zwróciło JSON. Sprawdź, czy serwer został uruchomiony ponownie.`);
   }
   return data;
 }
@@ -73,25 +79,59 @@ function updateAccount() {
 
 async function loadAdminPanel() {
   if (state.user?.role !== "admin") return;
-  const [summary, users, comments, recipes] = await Promise.all([
-    api("/admin/summary"),
-    api("/admin/users?limit=30"),
-    api("/admin/comments?limit=30"),
-    api("/admin/recipes?limit=30"),
-  ]);
-  state.adminData = { summary, users, comments, recipes };
-  renderAdminStats(summary.stats);
-  renderAdminPanel();
+  const statsNode = $("#adminStats");
+  const panelNode = $("#adminPanel");
+  try {
+    if (panelNode) panelNode.innerHTML = `<div class="admin-empty">Ladowanie panelu administratora...</div>`;
+    const [summary, users, comments, recipes] = await Promise.all([
+      api("/admin/summary"),
+      api("/admin/users?limit=30"),
+      api("/admin/comments?limit=30"),
+      api("/admin/recipes?limit=30"),
+    ]);
+    if (!summary?.stats) {
+      throw new Error("Endpoint /api/admin/summary nie zwrocil statystyk. Zrestartuj serwer aplikacji.");
+    }
+    state.adminData = { summary, users, comments, recipes };
+    renderAdminStats(summary.stats);
+    renderAdminPanel();
+  } catch (err) {
+    state.adminData = null;
+    if (statsNode) statsNode.innerHTML = "";
+    if (panelNode) {
+      panelNode.innerHTML = `
+        <div class="admin-empty error-state">
+          <strong>Nie udalo sie wczytac panelu administratora.</strong>
+          <span>${escapeHtml(err.message)}</span>
+        </div>
+      `;
+    }
+    toast(err.message);
+  }
 }
 
 function renderAdminStats(stats) {
+  const safeStats = {
+    users: 0,
+    admins: 0,
+    recipes: 0,
+    publishedRecipes: 0,
+    comments: 0,
+    hiddenComments: 0,
+    favorites: 0,
+    ratings: 0,
+    shoppingLists: 0,
+    mealPlans: 0,
+    openReports: 0,
+    ...stats,
+  };
   $("#adminStats").innerHTML = [
-    ["Uzytkownicy", stats.users, `${stats.admins} adminow`],
-    ["Przepisy", stats.recipes, `${stats.publishedRecipes} publicznych`],
-    ["Komentarze", stats.comments, `${stats.hiddenComments} ukrytych/usunietych`],
-    ["Aktywnosc", stats.favorites + stats.ratings, `${stats.shoppingLists} list zakupow`],
-    ["Plany", stats.mealPlans, "zaplanowane posilki"],
-    ["Zgloszenia", stats.openReports, "otwarte sprawy"],
+    ["Uzytkownicy", safeStats.users, `${safeStats.admins} adminow`],
+    ["Przepisy", safeStats.recipes, `${safeStats.publishedRecipes} publicznych`],
+    ["Komentarze", safeStats.comments, `${safeStats.hiddenComments} ukrytych/usunietych`],
+    ["Aktywnosc", safeStats.favorites + safeStats.ratings, `${safeStats.shoppingLists} list zakupow`],
+    ["Plany", safeStats.mealPlans, "zaplanowane posilki"],
+    ["Zgloszenia", safeStats.openReports, "otwarte sprawy"],
   ].map(([label, value, meta]) => `
     <article class="admin-stat">
       <span>${label}</span>
@@ -107,11 +147,20 @@ function renderAdminPanel() {
     tab.classList.toggle("active", tab.dataset.adminTab === state.adminTab);
   });
   const panel = $("#adminPanel");
+  const usersData = { items: [], total: 0, ...state.adminData.users };
+  const commentsData = { items: [], total: 0, ...state.adminData.comments };
+  const recipesData = { items: [], total: 0, ...state.adminData.recipes };
+  const summaryData = {
+    topRecipes: [],
+    newestUsers: [],
+    newestComments: [],
+    ...state.adminData.summary,
+  };
   if (state.adminTab === "users") {
     panel.innerHTML = `
-      <div class="admin-table-head"><h3>Uzytkownicy</h3><span>${state.adminData.users.total} kont</span></div>
+      <div class="admin-table-head"><h3>Uzytkownicy</h3><span>${usersData.total} kont</span></div>
       <div class="admin-table">
-        ${state.adminData.users.items.map((user) => `
+        ${usersData.items.map((user) => `
           <div class="admin-row">
             <div>
               <strong>${escapeHtml(user.profile?.displayName || user.username)}</strong>
@@ -131,9 +180,9 @@ function renderAdminPanel() {
   }
   if (state.adminTab === "comments") {
     panel.innerHTML = `
-      <div class="admin-table-head"><h3>Moderacja komentarzy</h3><span>${state.adminData.comments.total} komentarzy</span></div>
+      <div class="admin-table-head"><h3>Moderacja komentarzy</h3><span>${commentsData.total} komentarzy</span></div>
       <div class="admin-table">
-        ${state.adminData.comments.items.map((comment) => `
+        ${commentsData.items.map((comment) => `
           <div class="admin-row comment-row">
             <div>
               <strong>${escapeHtml(comment.userSnapshot?.displayName || comment.userSnapshot?.username || "Uzytkownik")}</strong>
@@ -153,9 +202,9 @@ function renderAdminPanel() {
   }
   if (state.adminTab === "recipes") {
     panel.innerHTML = `
-      <div class="admin-table-head"><h3>Zarzadzanie przepisami</h3><span>${state.adminData.recipes.total} rekordow</span></div>
+      <div class="admin-table-head"><h3>Zarzadzanie przepisami</h3><span>${recipesData.total} rekordow</span></div>
       <div class="admin-table">
-        ${state.adminData.recipes.items.map((recipe) => `
+        ${recipesData.items.map((recipe) => `
           <div class="admin-row">
             <div>
               <strong>${escapeHtml(recipe.title)}</strong>
@@ -177,15 +226,15 @@ function renderAdminPanel() {
     <div class="admin-overview">
       <div>
         <h3>Najpopularniejsze przepisy</h3>
-        ${state.adminData.summary.topRecipes.map((recipe) => `<p><strong>${escapeHtml(recipe.title)}</strong><span>${recipe.favoriteCount || 0} zapisow • ${recipe.ratingAvg || 0} ★</span></p>`).join("")}
+        ${summaryData.topRecipes.map((recipe) => `<p><strong>${escapeHtml(recipe.title)}</strong><span>${recipe.favoriteCount || 0} zapisow • ${recipe.ratingAvg || 0} ★</span></p>`).join("") || "<p><span>Brak danych</span></p>"}
       </div>
       <div>
         <h3>Najnowsi uzytkownicy</h3>
-        ${state.adminData.summary.newestUsers.map((user) => `<p><strong>${escapeHtml(user.profile?.displayName || user.username)}</strong><span>${escapeHtml(user.email)}</span></p>`).join("")}
+        ${summaryData.newestUsers.map((user) => `<p><strong>${escapeHtml(user.profile?.displayName || user.username)}</strong><span>${escapeHtml(user.email)}</span></p>`).join("") || "<p><span>Brak danych</span></p>"}
       </div>
       <div>
         <h3>Ostatnie komentarze</h3>
-        ${state.adminData.summary.newestComments.map((comment) => `<p><strong>${escapeHtml(comment.userSnapshot?.displayName || "Uzytkownik")}</strong><span>${escapeHtml(comment.body).slice(0, 110)}</span></p>`).join("")}
+        ${summaryData.newestComments.map((comment) => `<p><strong>${escapeHtml(comment.userSnapshot?.displayName || "Uzytkownik")}</strong><span>${escapeHtml(comment.body).slice(0, 110)}</span></p>`).join("") || "<p><span>Brak danych</span></p>"}
       </div>
     </div>
   `;
