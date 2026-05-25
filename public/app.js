@@ -66,8 +66,14 @@ function updateAccount() {
     
     if (avatarUrl && avatarUrl.trim() !== "") {
       avatarImg.src = avatarUrl;
-      avatarImg.style.display = "block";
-      initials.style.display = "none";
+      avatarImg.onload = () => {
+        avatarImg.style.display = "block";
+        initials.style.display = "none";
+      };
+      avatarImg.onerror = () => {
+        avatarImg.style.display = "none";
+        initials.style.display = "grid";
+      };
     } else {
       avatarImg.src = "";
       avatarImg.style.display = "none";
@@ -327,7 +333,7 @@ async function openRecipe(slug) {
   const formattedCategory = state.categories.find(c => c.slug === recipe.categorySlug)?.name || recipe.categorySlug;
   
   $("#recipeDetails").innerHTML = `
-    <button class="btn secondary" onclick="location.hash='#home'" style="margin-bottom: 24px; display: inline-flex; align-items: center; gap: 8px;">← Wróć do przepisów</button>
+    <button class="btn secondary" data-go-home="true" style="margin-bottom: 24px; display: inline-flex; align-items: center; gap: 8px;">← Wróć do przepisów</button>
     <div class="detail-layout">
       <div>
         <img class="detail-media" src="${recipe.images?.[0]?.url || ""}" alt="${escapeHtml(recipe.title)}">
@@ -345,7 +351,7 @@ async function openRecipe(slug) {
         <h3>Przygotowanie krok po kroku (kliknij krok, aby odznaczyć)</h3>
         <ol class="step-list">
           ${recipe.steps.map((step) => `
-            <li class="step-card" onclick="this.classList.toggle('completed')">
+            <li class="step-card" data-toggle-step="true">
               <span class="step-number">${step.order}</span>
               <div>
                 <p>${escapeHtml(step.instruction)}</p>
@@ -422,8 +428,8 @@ window.viewShoppingList = (id) => {
 
   const renderItems = () => {
     $("#shoppingListItems").innerHTML = list.items.map((item, index) => `
-      <div class="shopping-item-row ${item.checked ? 'checked' : ''}" onclick="toggleShoppingItem('${id}', ${index})">
-        <input type="checkbox" class="shopping-item-checkbox" ${item.checked ? 'checked' : ''} onclick="event.stopPropagation(); toggleShoppingItem('${id}', ${index})">
+      <div class="shopping-item-row ${item.checked ? 'checked' : ''}" data-toggle-shopping="${id}" data-item-index="${index}">
+        <input type="checkbox" class="shopping-item-checkbox" ${item.checked ? 'checked' : ''} data-toggle-shopping="${id}" data-item-index="${index}">
         <span class="shopping-item-text">${escapeHtml(item.name)} - <strong>${item.quantity} ${escapeHtml(item.unit)}</strong></span>
       </div>
     `).join("");
@@ -506,11 +512,11 @@ async function loadPrivatePanels() {
   $("#favoriteList").innerHTML = favorites.items.length
     ? favorites.items.map((item) => `
         <div class="list-item">
-          <div class="list-item-content" onclick="openRecipeBySlug('${item.recipeSnapshot.slug}')">
+          <div class="list-item-content" data-open-saved="${item.recipeSnapshot.slug}">
             <div class="list-item-title">${escapeHtml(item.recipeSnapshot.title)}</div>
             <p class="muted">⏱ ${item.recipeSnapshot.totalTimeMinutes} min • ★ ${item.recipeSnapshot.ratingAvg}</p>
           </div>
-          <button class="list-item-action-btn" onclick="removeFavorite('${item.recipeId}')" title="Usuń z ulubionych">×</button>
+          <button class="list-item-action-btn" data-remove-favorite="${item.recipeId}" title="Usuń z ulubionych">×</button>
         </div>
       `).join("")
     : `<div class="list-item">Brak zapisanych przepisów. Kliknij gwiazdkę przy przepisie!</div>`;
@@ -518,11 +524,11 @@ async function loadPrivatePanels() {
   $("#shoppingList").innerHTML = lists.items.length
     ? lists.items.map((list) => `
         <div class="list-item">
-          <div class="list-item-content" onclick="viewShoppingList('${list._id || list.id}')">
+          <div class="list-item-content" data-view-shopping-list="${list._id || list.id}">
             <div class="list-item-title">🛒 ${escapeHtml(list.name)}</div>
             <p class="muted">${list.items.length} produktów (${list.items.filter(i => i.checked).length} kupionych)</p>
           </div>
-          <button class="list-item-action-btn" onclick="deleteShoppingList('${list._id || list.id}')" title="Usuń listę">×</button>
+          <button class="list-item-action-btn" data-delete-shopping-list="${list._id || list.id}" title="Usuń listę">×</button>
         </div>
       `).join("")
     : `<div class="list-item">Brak list zakupów. Wygeneruj listę z dowolnego przepisu!</div>`;
@@ -530,11 +536,11 @@ async function loadPrivatePanels() {
   $("#mealList").innerHTML = plans.items.length
     ? plans.items.map((plan) => `
         <div class="list-item">
-          <div class="list-item-content" onclick="openRecipeBySlug('${plan.recipeSnapshot?.slug}')">
+          <div class="list-item-content" data-open-saved="${plan.recipeSnapshot?.slug || ""}">
             <div class="list-item-title">📅 ${formatMeal(plan.mealType)} • ${plan.plannedFor}</div>
             <p class="muted">${escapeHtml(plan.recipeSnapshot?.title || "Przepis")}, ${plan.servings} porcji</p>
           </div>
-          <button class="list-item-action-btn" onclick="deleteMealPlan('${plan._id || plan.id}')" title="Usuń posiłek">×</button>
+          <button class="list-item-action-btn" data-delete-meal-plan="${plan._id || plan.id}" title="Usuń posiłek">×</button>
         </div>
       `).join("")
     : `<div class="list-item">Brak zaplanowanych posiłków na najbliższe dni.</div>`;
@@ -619,6 +625,62 @@ document.addEventListener("click", async (event) => {
   const shopping = event.target.closest("[data-shopping]");
   const rate = event.target.closest("[data-rate]");
   const page = event.target.closest("[data-page]");
+  const closeDialog = event.target.closest("[data-close-dialog]");
+  const goHome = event.target.closest("[data-go-home]");
+  const toggleStep = event.target.closest("[data-toggle-step]");
+  const openSaved = event.target.closest("[data-open-saved]");
+  const removeFavoriteBtn = event.target.closest("[data-remove-favorite]");
+  const viewShoppingBtn = event.target.closest("[data-view-shopping-list]");
+  const deleteShoppingBtn = event.target.closest("[data-delete-shopping-list]");
+  const toggleShoppingBtn = event.target.closest("[data-toggle-shopping]");
+  const deleteMealBtn = event.target.closest("[data-delete-meal-plan]");
+
+  if (closeDialog) {
+    document.getElementById(closeDialog.dataset.closeDialog)?.close();
+    return;
+  }
+
+  if (goHome) {
+    location.hash = "#home";
+    return;
+  }
+
+  if (toggleStep) {
+    toggleStep.classList.toggle("completed");
+    return;
+  }
+
+  if (openSaved) {
+    const slug = openSaved.dataset.openSaved;
+    if (slug) location.hash = `#recipe/${slug}`;
+    return;
+  }
+
+  if (removeFavoriteBtn) {
+    await window.removeFavorite(removeFavoriteBtn.dataset.removeFavorite);
+    return;
+  }
+
+  if (viewShoppingBtn) {
+    window.viewShoppingList(viewShoppingBtn.dataset.viewShoppingList);
+    return;
+  }
+
+  if (deleteShoppingBtn) {
+    await window.deleteShoppingList(deleteShoppingBtn.dataset.deleteShoppingList);
+    return;
+  }
+
+  if (toggleShoppingBtn) {
+    event.stopPropagation();
+    await window.toggleShoppingItem?.(toggleShoppingBtn.dataset.toggleShopping, Number(toggleShoppingBtn.dataset.itemIndex));
+    return;
+  }
+
+  if (deleteMealBtn) {
+    await window.deleteMealPlan(deleteMealBtn.dataset.deleteMealPlan);
+    return;
+  }
 
   if (page) {
     const nextPage = Number(page.dataset.page);

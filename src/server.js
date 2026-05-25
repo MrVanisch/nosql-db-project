@@ -34,6 +34,9 @@ function createApp() {
   app.use(optionalAuth);
 
   app.use("/api", routes);
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Nie znaleziono endpointu API" } });
+  });
   app.use(express.static(publicDir, { maxAge: isProduction ? "1h" : 0 }));
   app.get("/{*splat}", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 
