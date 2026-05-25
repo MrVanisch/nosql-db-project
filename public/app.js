@@ -278,6 +278,7 @@ async function openRecipe(slug) {
   const formattedCategory = state.categories.find(c => c.slug === recipe.categorySlug)?.name || recipe.categorySlug;
   
   $("#recipeDetails").innerHTML = `
+    <button class="btn secondary" onclick="location.hash='#home'" style="margin-bottom: 24px; display: inline-flex; align-items: center; gap: 8px;">← Wróć do przepisów</button>
     <div class="detail-layout">
       <div>
         <img class="detail-media" src="${recipe.images?.[0]?.url || ""}" alt="${escapeHtml(recipe.title)}">
@@ -292,10 +293,10 @@ async function openRecipe(slug) {
         <ul style="margin-bottom: 24px;">
           ${recipe.ingredients.map((item) => `<li><strong>${escapeHtml(item.name)}</strong>: ${item.quantity} ${escapeHtml(item.unit)}</li>`).join("")}
         </ul>
-        <h3>Przygotowanie krok po kroku</h3>
+        <h3>Przygotowanie krok po kroku (kliknij krok, aby odznaczyć)</h3>
         <ol class="step-list">
           ${recipe.steps.map((step) => `
-            <li class="step-card">
+            <li class="step-card" onclick="this.classList.toggle('completed')">
               <span class="step-number">${step.order}</span>
               <div>
                 <p>${escapeHtml(step.instruction)}</p>
@@ -346,7 +347,6 @@ async function openRecipe(slug) {
       </aside>
     </div>
   `;
-  location.hash = "recipeDetails";
 }
 
 function renderRecipeSelect() {
@@ -356,7 +356,7 @@ function renderRecipeSelect() {
 
 // Global functions for inline onclick handlers
 window.openRecipeBySlug = (slug) => {
-  openRecipe(slug).catch((err) => toast(err.message));
+  location.hash = `#recipe/${slug}`;
 };
 
 window.viewShoppingList = (id) => {
@@ -580,7 +580,9 @@ document.addEventListener("click", async (event) => {
     location.hash = "home";
   }
   
-  if (open) openRecipe(open.dataset.open).catch((err) => toast(err.message));
+  if (open) {
+    location.hash = `#recipe/${open.dataset.open}`;
+  }
   
   if (favorite) {
     if (!requireLogin()) return;
@@ -805,14 +807,88 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+function handleRoute() {
+  const hash = location.hash || "#home";
+  
+  // Hide all sections first
+  const sections = ["home", "recipeDetails", "planner", "add", "admin"];
+  sections.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add("hidden");
+  });
+  
+  // Toggle hero section visibility (only on home catalog)
+  const hero = $(".hero");
+  if (hero) {
+    if (hash === "#home" || hash === "" || hash.startsWith("#search")) {
+      hero.classList.remove("hidden");
+    } else {
+      hero.classList.add("hidden");
+    }
+  }
+  
+  // Toggle active class on nav links
+  document.querySelectorAll(".nav a").forEach(link => {
+    const href = link.getAttribute("href");
+    if (href === hash || (hash === "#home" && href === "#home")) {
+      link.classList.add("active");
+    } else {
+      link.classList.remove("active");
+    }
+  });
+
+  // Handle specific views
+  if (hash === "#home" || hash === "" || hash.startsWith("#search")) {
+    $("#home").classList.remove("hidden");
+  } else if (hash === "#planner") {
+    $("#planner").classList.remove("hidden");
+  } else if (hash === "#add") {
+    $("#add").classList.remove("hidden");
+  } else if (hash === "#admin") {
+    if (state.user?.role === "admin") {
+      $("#admin").classList.remove("hidden");
+    } else {
+      location.hash = "#home";
+    }
+  } else if (hash.startsWith("#recipe/")) {
+    const slug = hash.replace("#recipe/", "");
+    openRecipe(slug).catch(() => {
+      location.hash = "#home";
+    });
+  } else if (hash === "#recipeDetails") {
+    $("#recipeDetails").classList.remove("hidden");
+  }
+  
+  // Smooth scroll to top on route change
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+window.addEventListener("hashchange", handleRoute);
+
 async function init() {
   updateAccount();
   const today = new Date().toISOString().slice(0, 10);
   $("#plannedFor").value = today;
+  
+  // Setup toggle advanced filters accordion trigger
+  const toggleFiltersBtn = $("#toggleFiltersBtn");
+  if (toggleFiltersBtn) {
+    toggleFiltersBtn.addEventListener("click", () => {
+      const panel = $("#advancedFilters");
+      if (panel) {
+        panel.classList.remove("hidden");
+        panel.classList.toggle("show");
+      }
+    });
+  }
+
   await loadCategories();
   await loadRecipes();
   await loadPrivatePanels();
   await loadAdminPanel();
+  
+  // Run router once to load correct initial view
+  handleRoute();
 }
 
 init().catch((err) => toast(err.message));

@@ -131,10 +131,12 @@ a { color: inherit; text-decoration: none; }
   background: var(--accent-2);
   transition: var(--transition);
 }
-.nav a:hover {
+.nav a:hover,
+.nav a.active {
   color: var(--ink);
 }
-.nav a:hover::after {
+.nav a:hover::after,
+.nav a.active::after {
   width: 100%;
 }
 
@@ -331,26 +333,49 @@ a { color: inherit; text-decoration: none; }
   font-weight: 700;
 }
 
-/* Search Panel */
+/* Search Panel - Premium Minimalist Collapsible */
 .search-panel {
   padding: 24px;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(16px);
   color: var(--ink);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  transition: var(--transition);
 }
 
 .search-row {
-  display: flex;
-  gap: 16px;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: 1fr 220px auto auto;
+  gap: 14px;
+  align-items: center;
 }
-.filter-row {
-  display: flex;
+
+.search-input-wrapper input {
+  font-size: 16px;
+}
+
+.filters-expanded {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, margin-top 0.4s ease;
+  opacity: 0;
+  margin-top: 0;
+}
+
+.filters-expanded.show {
+  max-height: 250px;
+  opacity: 1;
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
-  margin-top: 16px;
 }
 
 label {
@@ -385,9 +410,21 @@ input:focus, select:focus, textarea:focus {
 .search-row label { flex: 1; }
 .filter-row > * { flex: 1; }
 
-/* Sections */
+/* Sections & SPA Routing view transition */
 .section {
   padding: 60px clamp(18px, 6vw, 80px);
+  animation: viewEnter 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes viewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .section-head {
@@ -609,6 +646,26 @@ input:focus, select:focus, textarea:focus {
   border-radius: var(--radius);
   background: #fffdf8;
   box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.step-card:hover {
+  border-color: var(--accent);
+  background: #fffefb;
+  transform: translateX(4px);
+}
+.step-card.completed {
+  opacity: 0.55;
+  background: #f4f3ed;
+  border-color: var(--line);
+  box-shadow: none;
+}
+.step-card.completed .step-number {
+  background: var(--muted);
+}
+.step-card.completed p {
+  text-decoration: line-through;
+  color: var(--muted);
 }
 
 .step-number {
@@ -620,6 +677,7 @@ input:focus, select:focus, textarea:focus {
   background: var(--accent);
   color: #fff;
   font-weight: 900;
+  transition: var(--transition);
 }
 
 .step-card p {
@@ -712,16 +770,50 @@ input:focus, select:focus, textarea:focus {
   transform: scale(1.1);
 }
 
-/* Add recipe / editor */
-.editor {
-  display: grid;
-  gap: 20px;
-  padding: 24px;
+/* Add recipe / editor - Premium Grid Layout */
+.editor-form {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 32px;
+  margin-top: 10px;
 }
-.form-grid {
+.editor-layout {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-bottom: 24px;
+}
+.editor-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.editor-col h3 {
+  margin: 0 0 8px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 18px;
+  color: var(--accent);
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
+}
+.form-row-three {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.large-btn {
+  width: 100%;
+  padding: 14px 28px;
+  font-size: 16px;
+  border-radius: var(--radius);
 }
 
 /* Dialog styling (Premium UI) */
@@ -1093,7 +1185,7 @@ dialog::backdrop {
 
 @media (max-width: 880px) {
   .app-grid { grid-template-columns: 1fr; }
-  .form-grid { grid-template-columns: 1fr 1fr; }
+  .editor-layout { grid-template-columns: 1fr; gap: 24px; }
   .admin-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -1101,9 +1193,9 @@ dialog::backdrop {
   .brand span:last-child { display: none; }
   .account { margin-left: auto; }
   .section { padding: 40px 16px; }
-  .form-grid { grid-template-columns: 1fr; }
   h1 { font-size: 34px; }
-  .search-row, .filter-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .search-row { grid-template-columns: 1fr; gap: 10px; }
+  .filter-grid { grid-template-columns: 1fr; }
   .hero-stats { grid-template-columns: 1fr; }
   .admin-stats { grid-template-columns: 1fr; }
 }

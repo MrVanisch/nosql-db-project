@@ -38,39 +38,49 @@
     <main>
       <section class="hero">
         <div class="hero-content">
-          <p class="eyebrow">NoSQL recipes app</p>
-          <h1>Przepisy, zakupy i plan posilkow w jednym szybkim panelu</h1>
-          <p class="hero-copy">Wyszukuj po skladnikach, czasie, tagach i diecie. Zapisuj ulubione przepisy, generuj liste zakupow i planuj posilki bez przeladowywania strony.</p>
+          <p class="eyebrow">Aplikacja kulinarna NoSQL</p>
+          <h1>Przepisy, zakupy i plan posiłków w jednym szybkim panelu</h1>
+          <p class="hero-copy">Wyszukuj po składnikach, czasie, tagach i diecie. Zapisuj ulubione przepisy, generuj listę zakupów i planuj posiłki bez przeładowywania strony.</p>
           <div class="hero-stats" aria-label="Statystyki aplikacji">
-            <div><strong>200+</strong><span>przepisow w bazie</span></div>
+            <div><strong>200+</strong><span>przepisów w bazie</span></div>
             <div><strong>8</strong><span>kategorii</span></div>
-            <div><strong>1 klik</strong><span>lista zakupow</span></div>
+            <div><strong>1 klik</strong><span>lista zakupów</span></div>
           </div>
           <form id="searchForm" class="search-panel">
             <div class="search-row">
-              <label>
-                <span>Szukaj</span>
-                <input id="q" name="q" placeholder="np. makaron kurczak">
-              </label>
-              <label>
-                <span>Kategoria</span>
+              <div class="search-input-wrapper">
+                <input id="q" name="q" placeholder="Szukaj przepisów (np. makaron kurczak)...">
+              </div>
+              <div class="search-category-wrapper">
                 <select id="category" name="category"></select>
-              </label>
-              <label>
-                <span>Czas do</span>
-                <input id="maxTime" name="maxTime" type="number" min="1" placeholder="30">
-              </label>
-              <button class="btn primary" type="submit">Szukaj</button>
+              </div>
+              <button type="button" id="toggleFiltersBtn" class="btn secondary">Filtry ⚙️</button>
+              <button class="btn primary" type="submit">Szukaj 🔍</button>
             </div>
-            <div class="filter-row">
-              <input id="ingredients" name="ingredients" placeholder="Skladniki: szpinak, makaron">
-              <input id="tags" name="tags" placeholder="Tagi: szybki-obiad">
-              <select id="sort" name="sort">
-                <option value="newest">Najnowsze</option>
-                <option value="rating">Najwyzej oceniane</option>
-                <option value="popular">Popularne</option>
-                <option value="time">Najszybsze</option>
-              </select>
+            <div id="advancedFilters" class="filters-expanded hidden">
+              <div class="filter-grid">
+                <label>
+                  <span>Maksymalny czas (min)</span>
+                  <input id="maxTime" name="maxTime" type="number" min="1" placeholder="np. 30">
+                </label>
+                <label>
+                  <span>Składniki (oddziel przecinkami)</span>
+                  <input id="ingredients" name="ingredients" placeholder="np. szpinak, czosnek">
+                </label>
+                <label>
+                  <span>Tagi (oddziel przecinkami)</span>
+                  <input id="tags" name="tags" placeholder="np. szybki-obiad, wege">
+                </label>
+                <label>
+                  <span>Sortuj według</span>
+                  <select id="sort" name="sort">
+                    <option value="newest">Najnowsze</option>
+                    <option value="rating">Najwyżej oceniane</option>
+                    <option value="popular">Popularne</option>
+                    <option value="time">Najszybsze</option>
+                  </select>
+                </label>
+              </div>
             </div>
           </form>
         </div>
@@ -132,24 +142,60 @@
         <div class="section-head">
           <div>
             <p class="eyebrow">Tworzenie</p>
-            <h2>Dodaj przepis</h2>
+            <h2>Dodaj własny przepis</h2>
           </div>
         </div>
-        <form id="recipeForm" class="editor">
-          <div class="form-grid">
-            <label>Tytul<input id="newTitle" required minlength="3"></label>
-            <label>Kategoria<select id="newCategory" required></select></label>
-            <label>Tagi<input id="newTags" placeholder="makaron, szybki-obiad"></label>
-            <label>Diety<input id="newDiets" placeholder="vegetarian"></label>
-            <label>Czas przygotowania<input id="prepTime" type="number" min="0" value="10"></label>
-            <label>Czas gotowania<input id="cookTime" type="number" min="0" value="20"></label>
-            <label>Porcje<input id="servings" type="number" min="1" value="2"></label>
-            <label>Trudnosc<select id="difficulty"><option value="easy">Latwy</option><option value="medium">Sredni</option><option value="hard">Trudny</option></select></label>
+        <form id="recipeForm" class="editor-form">
+          <div class="editor-layout">
+            <div class="editor-col technicals">
+              <h3>Informacje ogólne</h3>
+              <label>Tytuł przepisu
+                <input id="newTitle" required minlength="3" placeholder="np. Aromatyczne Curry z Ciecierzycą">
+              </label>
+              <div class="form-row">
+                <label>Kategoria
+                  <select id="newCategory" required></select>
+                </label>
+                <label>Trudność
+                  <select id="difficulty">
+                    <option value="easy">Łatwy</option>
+                    <option value="medium">Średni</option>
+                    <option value="hard">Trudny</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-row-three">
+                <label>Przygotowanie (min)
+                  <input id="prepTime" type="number" min="0" value="10">
+                </label>
+                <label>Gotowanie (min)
+                  <input id="cookTime" type="number" min="0" value="20">
+                </label>
+                <label>Porcje
+                  <input id="servings" type="number" min="1" value="2">
+                </label>
+              </div>
+              <label>Tagi (oddziel przecinkami)
+                <input id="newTags" placeholder="np. szybki-obiad, wege, curry">
+              </label>
+              <label>Diety (oddziel przecinkami)
+                <input id="newDiets" placeholder="np. vegetarian, gluten-free">
+              </label>
+            </div>
+            <div class="editor-col content">
+              <h3>Opis, składniki i kroki</h3>
+              <label>Krótki opis
+                <textarea id="newDescription" required minlength="12" placeholder="Napisz krótki i zachęcający wstęp do swojego przepisu..."></textarea>
+              </label>
+              <label>Składniki (nazwa | ilość | jednostka - każdy w nowej linii)
+                <textarea id="newIngredients" placeholder="np.&#10;makaron penne | 250 | g&#10;pierś z kurczaka | 300 | g&#10;śmietanka 30% | 150 | ml" required></textarea>
+              </label>
+              <label>Kroki przygotowania (każdy krok w nowej linii)
+                <textarea id="newSteps" placeholder="np.&#10;Ugotuj makaron al dente w osolonej wodzie.&#10;Pokrój kurczaka w kostkę i podsmaż na oliwie z oliwek.&#10;Dodaj śmietankę i wymieszaj z makaronem." required></textarea>
+              </label>
+            </div>
           </div>
-          <label>Opis<textarea id="newDescription" required minlength="12"></textarea></label>
-          <label>Skladniki<textarea id="newIngredients" placeholder="makaron penne | 250 | g&#10;kurczak | 300 | g" required></textarea></label>
-          <label>Kroki<textarea id="newSteps" placeholder="Ugotuj makaron.&#10;Podsmaz skladniki." required></textarea></label>
-          <button class="btn primary" type="submit">Opublikuj przepis</button>
+          <button class="btn primary large-btn" type="submit">Opublikuj przepis 🍳</button>
         </form>
       </section>
 
