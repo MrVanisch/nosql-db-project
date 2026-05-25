@@ -38,7 +38,13 @@ function requireAuth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.user || req.user.role !== "admin") {
+  if (!req.user) {
+    return errorResponse(res, 401, "UNAUTHORIZED", "Wymagane logowanie");
+  }
+  if (req.user.status === "blocked") {
+    return errorResponse(res, 403, "ACCOUNT_BLOCKED", "Konto zostalo zablokowane przez administratora");
+  }
+  if (req.user.role !== "admin") {
     return errorResponse(res, 403, "FORBIDDEN", "Wymagane uprawnienia administratora");
   }
   next();

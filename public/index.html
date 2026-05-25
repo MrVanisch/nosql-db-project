@@ -12,13 +12,14 @@
   <body>
     <header class="topbar">
       <a class="brand" href="#home" aria-label="CookFlow">
-        <span class="brand-mark">CF</span>
+        <img class="brand-logo" src="/assets/cookflow-logo.svg" alt="" width="40" height="40">
         <span>CookFlow</span>
       </a>
       <nav class="nav">
         <a href="#home">Przepisy</a>
         <a href="#planner">Plan</a>
         <a href="#saved">Zapisane</a>
+        <a href="#shopping">Lista zakupów</a>
         <a href="#add">Dodaj</a>
         <a id="adminNavLink" class="hidden" href="#admin">Admin</a>
       </nav>
@@ -42,14 +43,15 @@
           <h1>Przepisy, zakupy i plan posiłków w jednym szybkim panelu</h1>
           <p class="hero-copy">Wyszukuj po składnikach, czasie, tagach i diecie. Zapisuj ulubione przepisy, generuj listę zakupów i planuj posiłki bez przeładowywania strony.</p>
           <div class="hero-stats" aria-label="Statystyki aplikacji">
-            <div><strong>200+</strong><span>przepisów w bazie</span></div>
-            <div><strong>8</strong><span>kategorii</span></div>
-            <div><strong>1 klik</strong><span>lista zakupów</span></div>
+            <div><strong id="statRecipesCount">200+</strong><span>przepisów w bazie</span></div>
+            <div><strong id="statCategoriesCount">8</strong><span>kategorii</span></div>
+            <div><strong id="statShoppingListsCount">1 klik</strong><span>generowanie list</span></div>
           </div>
           <form id="searchForm" class="search-panel">
             <div class="search-row">
-              <div class="search-input-wrapper">
-                <input id="q" name="q" placeholder="Szukaj przepisów (np. makaron kurczak)...">
+              <div class="search-input-wrapper" style="position: relative; flex: 1.5; z-index: 50;">
+                <input id="q" name="q" placeholder="Szukaj przepisów (np. makaron kurczak)..." autocomplete="off">
+                <div id="recipeSearchDropdown" class="searchable-select-dropdown hidden" style="position: absolute; top: 105%; left: 0; right: 0; z-index: 9999; max-height: 260px; overflow-y: auto; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-lg);"></div>
               </div>
               <div class="search-category-wrapper">
                 <select id="category" name="category"></select>
@@ -100,41 +102,125 @@
 
       <section id="recipeDetails" class="section detail-shell hidden"></section>
 
-      <section id="planner" class="section app-grid">
-        <div class="panel">
-          <div class="section-head compact">
+      <section id="planner" class="section planner-section">
+        <div class="panel planner-panel">
+          <div class="section-head compact" style="margin-bottom: 24px;">
             <div>
               <p class="eyebrow">Kalendarz</p>
-              <h2>Plan posilkow</h2>
+              <h2>Plan posiłków</h2>
             </div>
           </div>
-          <form id="mealForm" class="stack">
-            <select id="mealRecipe"></select>
-            <div class="two">
-              <input id="plannedFor" type="date" required>
-              <select id="mealType">
-                <option value="breakfast">Sniadanie</option>
-                <option value="lunch">Lunch</option>
-                <option value="dinner">Obiad</option>
-                <option value="supper">Kolacja</option>
-                <option value="snack">Przekaska</option>
-              </select>
-            </div>
-            <input id="mealServings" type="number" min="1" value="2" placeholder="Porcje">
-            <button class="btn primary" type="submit">Dodaj do planu</button>
-          </form>
-          <div id="mealList" class="list"></div>
-        </div>
 
-        <div id="saved" class="panel">
+          <div class="planner-layout">
+            <!-- Formularz dodawania posiłku -->
+            <div class="planner-form-container">
+              <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 18px; border-bottom: 1px solid var(--line); padding-bottom: 8px; color: var(--accent);">➕ Dodaj do planu</h3>
+              <form id="mealForm" class="stack" style="position: relative;">
+                <div class="searchable-select-container">
+                  <label for="mealRecipeSearch">Wyszukaj przepis</label>
+                  <div class="searchable-select-input-wrapper">
+                    <input id="mealRecipeSearch" type="text" placeholder="🔍 Wpisz nazwę przepisu..." autocomplete="off" required>
+                    <input id="mealRecipe" type="hidden" required>
+                    <div id="mealRecipeDropdown" class="searchable-select-dropdown hidden" style="position: absolute; top: 105%; left: 0; right: 0; z-index: 9999; max-height: 260px; overflow-y: auto; background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-lg);"></div>
+                  </div>
+                </div>
+
+                <div class="two">
+                  <label>
+                    <span>Data posiłlu</span>
+                    <input id="plannedFor" type="date" required>
+                  </label>
+                  <label>
+                    <span>Typ posiłku</span>
+                    <select id="mealType">
+                      <option value="breakfast">Śniadanie</option>
+                      <option value="lunch">Lunch</option>
+                      <option value="dinner">Obiad</option>
+                      <option value="supper">Kolacja</option>
+                      <option value="snack">Przekąska</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label>
+                  <span>Liczba porcji</span>
+                  <input id="mealServings" type="number" min="1" value="2" placeholder="Porcje" required>
+                </label>
+
+                <button class="btn primary" type="submit" style="width: 100%; margin-top: 8px;">📅 Zaplanuj posiłek</button>
+              </form>
+            </div>
+
+            <!-- Kalendarz i lista posiłków -->
+            <div class="planner-calendar-container">
+              <!-- Pasek tygodniowy -->
+              <div class="calendar-strip-wrapper">
+                <div class="calendar-strip-head" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <h4 style="margin: 0; font-size: 15px; color: var(--ink);">Wybierz dzień tygodnia:</h4>
+                  <button id="clearCalendarFilter" class="btn text small hidden" style="padding: 0; font-weight: 700; color: var(--accent); border: 0; background: transparent; cursor: pointer;">Pokaż wszystkie</button>
+                </div>
+                <div id="calendarStrip" class="calendar-strip"></div>
+              </div>
+
+              <div id="mealList" class="plan-list"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="saved" class="section saved-section hidden">
+        <div class="panel saved-panel">
+          <div class="section-head compact" style="margin-bottom: 24px;">
+            <div>
+              <p class="eyebrow">Biblioteka</p>
+              <h2>Zapisane</h2>
+            </div>
+          </div>
+
+          <div class="saved-layout">
+            <!-- Lewa kolumna: Ulubione przepisy -->
+            <div class="saved-column">
+              <div class="saved-block-head" style="margin-bottom: 16px; border-bottom: 1px solid var(--line); padding-bottom: 8px;">
+                <h3 style="color: var(--accent); margin: 0; font-size: 18px;">❤️ Ulubione przepisy</h3>
+                <p class="muted" style="font-size: 13px; margin-top: 4px;">Przepisy zapisane do szybkiego powrotu.</p>
+              </div>
+              <div id="favoriteList" class="saved-list favorites-list"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="shopping" class="section shopping-section hidden">
+        <div class="panel shopping-panel">
           <div class="section-head compact">
             <div>
-              <p class="eyebrow">Konto</p>
-              <h2>Ulubione i zakupy</h2>
+              <p class="eyebrow">Zakupy</p>
+              <h2>Lista zakupów</h2>
             </div>
           </div>
-          <div id="favoriteList" class="list"></div>
-          <div id="shoppingList" class="list"></div>
+          <div class="shopping-overview">
+            <div class="shopping-overview-card">
+              <span>Listy</span>
+              <strong id="shoppingListCount">0</strong>
+            </div>
+            <div class="shopping-overview-card">
+              <span>Produkty</span>
+              <strong id="shoppingItemCount">0</strong>
+            </div>
+            <div class="shopping-overview-card">
+              <span>Kupione</span>
+              <strong id="shoppingCheckedCount">0</strong>
+            </div>
+          </div>
+          <div class="shopping-board">
+            <div class="shopping-board-head">
+              <div>
+                <h3>Twoje listy</h3>
+                <p>Otwórz listę, odhacz produkty i usuń ją po zakupach.</p>
+              </div>
+            </div>
+            <div id="shoppingList" class="shopping-list-grid"></div>
+          </div>
         </div>
       </section>
 
@@ -175,24 +261,73 @@
                   <input id="servings" type="number" min="1" value="2">
                 </label>
               </div>
+              <label>Zdjęcie przepisu (adres URL)
+                <input id="newImageUrl" placeholder="np. https://images.unsplash.com/... (pozostaw puste dla domyślnego)">
+              </label>
               <label>Tagi (oddziel przecinkami)
                 <input id="newTags" placeholder="np. szybki-obiad, wege, curry">
               </label>
               <label>Diety (oddziel przecinkami)
                 <input id="newDiets" placeholder="np. vegetarian, gluten-free">
               </label>
+              <details style="margin-top: 16px; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; background: var(--bg);">
+                <summary style="cursor: pointer; font-weight: 700; color: var(--accent); font-size: 13px;">📊 Wartości odżywcze (opcjonalnie)</summary>
+                <div class="form-row-four" style="margin-top: 12px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
+                  <label style="font-size: 11px;">Kcal
+                    <input id="nutCalories" type="number" min="0" value="0" style="min-height: 34px; padding: 4px 6px;">
+                  </label>
+                  <label style="font-size: 11px;">Białko (g)
+                    <input id="nutProtein" type="number" min="0" value="0" style="min-height: 34px; padding: 4px 6px;">
+                  </label>
+                  <label style="font-size: 11px;">Tłuszcz (g)
+                    <input id="nutFat" type="number" min="0" value="0" style="min-height: 34px; padding: 4px 6px;">
+                  </label>
+                  <label style="font-size: 11px;">Węgle (g)
+                    <input id="nutCarbs" type="number" min="0" value="0" style="min-height: 34px; padding: 4px 6px;">
+                  </label>
+                </div>
+              </details>
             </div>
             <div class="editor-col content">
               <h3>Opis, składniki i kroki</h3>
               <label>Krótki opis
                 <textarea id="newDescription" required minlength="12" placeholder="Napisz krótki i zachęcający wstęp do swojego przepisu..."></textarea>
               </label>
-              <label>Składniki (nazwa | ilość | jednostka - każdy w nowej linii)
-                <textarea id="newIngredients" placeholder="np.&#10;makaron penne | 250 | g&#10;pierś z kurczaka | 300 | g&#10;śmietanka 30% | 150 | ml" required></textarea>
-              </label>
-              <label>Kroki przygotowania (każdy krok w nowej linii)
-                <textarea id="newSteps" placeholder="np.&#10;Ugotuj makaron al dente w osolonej wodzie.&#10;Pokrój kurczaka w kostkę i podsmaż na oliwie z oliwek.&#10;Dodaj śmietankę i wymieszaj z makaronem." required></textarea>
-              </label>
+              
+              <!-- Dynamiczny kreator składników -->
+              <div style="margin-top: 8px; margin-bottom: 8px;">
+                <span style="font-weight: 700; font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px;">Dodane składniki</span>
+                <div id="ingredientsList" style="padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); min-height: 50px; margin-bottom: 8px; max-height: 150px; overflow-y: auto;"></div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: flex-end; margin-bottom: 16px;">
+                <label style="flex: 2; margin-bottom: 0;">Nazwa składnika
+                  <input type="text" id="ingNameInput" placeholder="np. Czosnek" style="min-height: 38px; padding: 6px 10px; font-size: 14px;">
+                </label>
+                <label style="width: 75px; margin-bottom: 0;">Ilość
+                  <input type="number" id="ingQtyInput" placeholder="Ilość" value="1" min="0.1" step="any" style="min-height: 38px; padding: 6px 10px; font-size: 14px;">
+                </label>
+                <label style="width: 75px; margin-bottom: 0;">Jedn.
+                  <input type="text" id="ingUnitInput" placeholder="Jedn." value="ząbek" style="min-height: 38px; padding: 6px 10px; font-size: 14px;">
+                </label>
+                <button type="button" id="addIngBtn" class="btn primary small" style="min-height: 38px; padding: 0 14px; margin-bottom: 0; white-space: nowrap;">Dodaj ➕</button>
+              </div>
+
+              <!-- Dynamiczny kreator kroków przygotowania -->
+              <div style="margin-top: 8px; margin-bottom: 8px;">
+                <span style="font-weight: 700; font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px;">Kroki przygotowania</span>
+                <div id="stepsList" style="padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); min-height: 50px; margin-bottom: 8px; max-height: 150px; overflow-y: auto;"></div>
+              </div>
+              <div style="border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin-bottom: 16px; background: #fff;">
+                <label style="margin-bottom: 8px;">Opis kroku
+                  <textarea id="stepInstructionInput" placeholder="Napisz czynność (np. Posiekaj czosnek i podsmaż na maśle)..." style="min-height: 50px; padding: 6px 10px; font-size: 14px;"></textarea>
+                </label>
+                <div style="display: flex; gap: 8px; align-items: flex-end;">
+                  <label style="width: 110px; margin-bottom: 0;">Czas (min)
+                    <input type="number" id="stepDurationInput" placeholder="Czas" value="5" min="0" style="min-height: 38px; padding: 6px 10px; font-size: 14px;">
+                  </label>
+                  <button type="button" id="addStepBtn" class="btn primary small" style="min-height: 38px; padding: 0 14px; margin-left: auto; margin-bottom: 0; white-space: nowrap;">Dodaj krok ➕</button>
+                </div>
+              </div>
             </div>
           </div>
           <button class="btn primary large-btn" type="submit">Opublikuj przepis 🍳</button>
@@ -238,11 +373,23 @@
     </dialog>
 
     <dialog id="shoppingListDialog">
-      <div class="dialog-card">
+      <div class="dialog-card" style="max-width: 520px; width: 100%;">
         <button class="icon-btn close" data-close-dialog="shoppingListDialog" aria-label="Zamknij">×</button>
-        <h2 id="shoppingListName">Lista zakupów</h2>
-        <p id="shoppingListMeta" class="muted"></p>
-        <div id="shoppingListItems" class="shopping-items-list">
+        <h2 id="shoppingListName" style="margin-bottom: 6px; font-size: 22px; color: var(--ink); line-height: 1.2; padding-right: 32px;">Lista zakupów</h2>
+        <div style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+          <p id="shoppingListMeta" class="muted" style="margin: 0; font-size: 14px; font-weight: 500;"></p>
+          <button id="renameShoppingListBtn" class="btn text small" style="padding: 4px 8px; font-size: 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--accent); cursor: pointer;" title="Zmień nazwę listy">✏️ Zmień nazwę</button>
+        </div>
+        
+        <!-- Formularz dodawania nowego produktu -->
+        <form id="addShoppingItemForm" style="display: flex; gap: 8px; margin-bottom: 16px;">
+          <input type="text" id="newShoppingItemName" placeholder="Nazwa produktu (np. Jajka)..." required style="flex: 2; min-height: 38px; padding: 6px 10px; font-size: 14px;">
+          <input type="number" id="newShoppingItemQty" placeholder="Ilość" value="1" min="0.1" step="any" required style="width: 75px; min-height: 38px; padding: 6px 10px; font-size: 14px;">
+          <input type="text" id="newShoppingItemUnit" placeholder="Jedn." value="szt" style="width: 75px; min-height: 38px; padding: 6px 10px; font-size: 14px;">
+          <button type="submit" class="btn primary small" style="min-height: 38px; padding: 0 14px;">Dodaj ➕</button>
+        </form>
+
+        <div id="shoppingListItems" class="shopping-items-list" style="margin-bottom: 20px; max-height: 300px; overflow-y: auto;">
           <!-- Dynamic checkboxes go here -->
         </div>
         <div class="dialog-actions">

@@ -5,12 +5,17 @@ const state = {
   categories: [],
   selectedRecipe: null,
   shoppingLists: [],
+  favorites: [],
   authMode: "login",
   page: 1,
   pages: 1,
   lastParams: new URLSearchParams(),
   adminTab: "users",
   adminData: null,
+  selectedPlanDate: null,
+  totalRecipes: 0,
+  formIngredients: [],
+  formSteps: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -268,6 +273,13 @@ async function loadRecipes(params = new URLSearchParams()) {
   renderRecipes();
   renderPagination();
   renderRecipeSelect();
+
+  // If no search filters are active, this is the absolute total of published recipes
+  const isFiltered = params.get("q") || params.get("category") || params.get("difficulty") || params.get("maxTime") || params.get("minRating") || params.get("tags") || params.get("diet") || params.get("ingredients");
+  if (!isFiltered) {
+    state.totalRecipes = data.total;
+  }
+  updateHeroStats();
 }
 
 function renderRecipes() {
@@ -404,9 +416,46 @@ async function openRecipe(slug) {
   `;
 }
 
+let allRecipesCache = null;
+
+async function getAllRecipes() {
+  if (allRecipesCache) return allRecipesCache;
+  try {
+    const data = await api("/recipes?limit=250");
+    allRecipesCache = data.items;
+    return allRecipesCache;
+  } catch (err) {
+    console.error("Error loading recipes for search:", err);
+    return state.recipes || [];
+  }
+}
+
 function renderRecipeSelect() {
-  const options = state.recipes.map((recipe) => `<option value="${recipe.id}">${recipe.title}</option>`).join("");
-  $("#mealRecipe").innerHTML = options;
+  // Clear the search cache when recipe list changes
+  allRecipesCache = null;
+}
+
+function updateHeroStats() {
+  const recipesCountEl = $("#statRecipesCount");
+  if (recipesCountEl && state.totalRecipes) {
+    recipesCountEl.textContent = String(state.totalRecipes);
+  }
+  const categoriesCountEl = $("#statCategoriesCount");
+  if (categoriesCountEl && state.categories) {
+    categoriesCountEl.textContent = String(state.categories.length);
+  }
+  const shoppingCountEl = $("#statShoppingListsCount");
+  if (shoppingCountEl) {
+    if (state.user && state.shoppingLists && state.shoppingLists.length > 0) {
+      shoppingCountEl.textContent = String(state.shoppingLists.length);
+      const span = shoppingCountEl.nextElementSibling;
+      if (span) span.textContent = state.shoppingLists.length === 1 ? "Twoja lista" : state.shoppingLists.length < 5 ? "Twoje listy" : "Twoich list";
+    } else {
+      shoppingCountEl.textContent = "1 klik";
+      const span = shoppingCountEl.nextElementSibling;
+      if (span) span.textContent = "generowanie list";
+    }
+  }
 }
 
 // Global functions for inline onclick handlers
@@ -418,7 +467,28 @@ window.viewShoppingList = (id) => {
   const list = state.shoppingLists.find(l => (l._id || l.id) === id);
   if (!list) return;
   
-  $("#shoppingListName").textContent = list.name;
+  const updateTitle = () => {
+    $("#shoppingListName").textContent = list.name;
+  };
+  updateTitle();
+  
+  $("#renameShoppingListBtn").onclick = async () => {
+    const newListName = prompt("Zmień nazwę listy zakupów:", list.name);
+    if (newListName && newListName.trim()) {
+      list.name = newListName.trim();
+      updateTitle();
+      try {
+        await api(`/me/shopping-lists/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name: list.name }),
+        });
+        await loadPrivatePanels();
+        toast("Nazwa listy została zmieniona!");
+      } catch (err) {
+        toast("Błąd zmiany nazwy: " + err.message);
+      }
+    }
+  };
   
   const updateMeta = () => {
     const checkedCount = list.items.filter(i => i.checked).length;
@@ -426,13 +496,105 @@ window.viewShoppingList = (id) => {
   };
   updateMeta();
 
+  const updateBackgroundStats = () => {
+    const shoppingItemCount = state.shoppingLists.reduce((sum, list) => sum + list.items.length, 0);
+    const shoppingCheckedCount = state.shoppingLists.reduce((sum, list) => sum + list.items.filter(i => i.checked).length, 0);
+    $("#shoppingCheckedCount").textContent = String(shoppingCheckedCount);
+    
+    const cardMain = $(`[data-view-shopping-list="${id}"]`);
+    if (cardMain) {
+      const checked = list.items.filter(i => i.checked).length;
+      const progress = list.items.length ? Math.round((checked / list.items.length) * 100) : 0;
+      
+      const spanText = cardMain.querySelector("span:not(.saved-card-type):not(.progress-track)");
+      if (spanText) {
+        spanText.textContent = `${list.items.length} produktów • ${checked} kupionych`;
+      }
+      
+      const progressTrackInner = cardMain.querySelector(".progress-track span");
+      if (progressTrackInner) {
+        progressTrackInner.style.width = `${progress}%`;
+      }
+    }
+    
+    updateHeroStats();
+  };
+
   const renderItems = () => {
-    $("#shoppingListItems").innerHTML = list.items.map((item, index) => `
-      <div class="shopping-item-row ${item.checked ? 'checked' : ''}" data-toggle-shopping="${id}" data-item-index="${index}">
-        <input type="checkbox" class="shopping-item-checkbox" ${item.checked ? 'checked' : ''} data-toggle-shopping="${id}" data-item-index="${index}">
-        <span class="shopping-item-text">${escapeHtml(item.name)} - <strong>${item.quantity} ${escapeHtml(item.unit)}</strong></span>
-      </div>
-    `).join("");
+    $("#shoppingListItems").innerHTML = list.items.length
+      ? list.items.map((item, index) => `
+        <div class="shopping-item-row ${item.checked ? 'checked' : ''}" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; width: 100%;" data-toggle-shopping="${id}" data-item-index="${index}">
+          <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+            <input type="checkbox" class="shopping-item-checkbox" ${item.checked ? 'checked' : ''} data-toggle-shopping="${id}" data-item-index="${index}">
+            <span class="shopping-item-text" style="${item.checked ? 'text-decoration: line-through; color: var(--muted);' : ''}">${escapeHtml(item.name)} - <strong>${item.quantity} ${escapeHtml(item.unit)}</strong></span>
+          </div>
+          <div class="shopping-item-actions" style="display: flex; gap: 6px;">
+            <button class="btn text small" style="padding: 4px 8px; font-size: 12px; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; color: var(--accent);" data-edit-shopping-item="${id}" data-item-index="${index}" title="Edytuj produkt">✏️</button>
+            <button class="btn text small danger" style="padding: 4px 8px; font-size: 12px; border: 1px solid #ffd9d6; border-radius: 4px; background: #ffd9d6; color: var(--danger); cursor: pointer;" data-delete-shopping-item="${id}" data-item-index="${index}" title="Usuń produkt">×</button>
+          </div>
+        </div>
+      `).join("")
+      : `<div class="empty-state" style="text-align: center; padding: 16px;">Brak produktów na liście. Dodaj coś powyżej!</div>`;
+  };
+
+  window.deleteShoppingItemRow = async (listId, itemIndex) => {
+    const targetList = state.shoppingLists.find(l => (l._id || l.id) === listId);
+    if (!targetList) return;
+    
+    if (!confirm(`Czy na pewno chcesz usunąć "${targetList.items[itemIndex].name}" z listy?`)) return;
+    
+    targetList.items.splice(itemIndex, 1);
+    renderItems();
+    updateMeta();
+    updateBackgroundStats();
+    
+    try {
+      await api(`/me/shopping-lists/${listId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ items: targetList.items }),
+      });
+      await loadPrivatePanels();
+      toast("Produkt został usunięty");
+    } catch (err) {
+      toast("Błąd zapisu listy: " + err.message);
+    }
+  };
+
+  window.editShoppingItem = async (listId, itemIndex) => {
+    const targetList = state.shoppingLists.find(l => (l._id || l.id) === listId);
+    if (!targetList) return;
+    const item = targetList.items[itemIndex];
+    
+    const newName = prompt("Edytuj nazwę produktu:", item.name);
+    if (newName === null) return;
+    const trimmedName = newName.trim();
+    if (!trimmedName) return;
+    
+    const newQtyStr = prompt("Edytuj ilość:", item.quantity);
+    if (newQtyStr === null) return;
+    const newQty = Number(newQtyStr || 1);
+    
+    const newUnit = prompt("Edytuj jednostkę:", item.unit);
+    if (newUnit === null) return;
+    
+    item.name = trimmedName;
+    item.quantity = isNaN(newQty) ? item.quantity : newQty;
+    item.unit = newUnit.trim() || item.unit;
+    
+    renderItems();
+    updateMeta();
+    updateBackgroundStats();
+    
+    try {
+      await api(`/me/shopping-lists/${listId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ items: targetList.items }),
+      });
+      await loadPrivatePanels();
+      toast("Produkt został zaktualizowany");
+    } catch (err) {
+      toast("Błąd zapisu produktu: " + err.message);
+    }
   };
 
   window.toggleShoppingItem = async (listId, itemIndex) => {
@@ -442,6 +604,7 @@ window.viewShoppingList = (id) => {
     targetList.items[itemIndex].checked = !targetList.items[itemIndex].checked;
     renderItems();
     updateMeta();
+    updateBackgroundStats();
 
     try {
       await api(`/me/shopping-lists/${listId}`, {
@@ -451,6 +614,36 @@ window.viewShoppingList = (id) => {
       await loadPrivatePanels();
     } catch (err) {
       toast("Błąd zapisu stanu: " + err.message);
+    }
+  };
+
+  $("#addShoppingItemForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const name = $("#newShoppingItemName").value.trim();
+    const qty = Number($("#newShoppingItemQty").value || 1);
+    const unit = $("#newShoppingItemUnit").value.trim() || "szt";
+    
+    if (!name) return;
+    
+    list.items.push({ name, quantity: qty, unit, checked: false });
+    
+    $("#newShoppingItemName").value = "";
+    $("#newShoppingItemQty").value = "1";
+    $("#newShoppingItemUnit").value = "szt";
+    
+    renderItems();
+    updateMeta();
+    updateBackgroundStats();
+    
+    try {
+      await api(`/me/shopping-lists/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ items: list.items }),
+      });
+      await loadPrivatePanels();
+      toast("Dodano produkt do listy!");
+    } catch (err) {
+      toast("Błąd zapisu produktu: " + err.message);
     }
   };
 
@@ -496,9 +689,13 @@ window.deleteMealPlan = async (planId) => {
 
 async function loadPrivatePanels() {
   if (!state.user) {
-    $("#favoriteList").innerHTML = `<div class="list-item">Zaloguj się, aby zobaczyć ulubione przepisy.</div>`;
-    $("#shoppingList").innerHTML = `<div class="list-item">Zaloguj się, aby zobaczyć swoje listy zakupów.</div>`;
-    $("#mealList").innerHTML = `<div class="list-item">Zaloguj się, aby zaplanować posiłki.</div>`;
+    $("#favoriteList").innerHTML = `<div class="empty-state">Zaloguj się, aby zobaczyć ulubione przepisy.</div>`;
+    $("#shoppingList").innerHTML = `<div class="empty-state">Zaloguj się, aby zobaczyć swoje listy zakupów.</div>`;
+    $("#mealList").innerHTML = `<div class="empty-state">Zaloguj się, aby zaplanować posiłki.</div>`;
+    $("#shoppingListCount").textContent = "0";
+    $("#shoppingItemCount").textContent = "0";
+    $("#shoppingCheckedCount").textContent = "0";
+    updateHeroStats();
     return;
   }
   const [favorites, lists, plans] = await Promise.all([
@@ -508,42 +705,286 @@ async function loadPrivatePanels() {
   ]);
   
   state.shoppingLists = lists.items;
+  const shoppingItemCount = lists.items.reduce((sum, list) => sum + list.items.length, 0);
+  const shoppingCheckedCount = lists.items.reduce((sum, list) => sum + list.items.filter(i => i.checked).length, 0);
+  $("#shoppingListCount").textContent = String(lists.items.length);
+  $("#shoppingItemCount").textContent = String(shoppingItemCount);
+  $("#shoppingCheckedCount").textContent = String(shoppingCheckedCount);
+  updateHeroStats();
 
   $("#favoriteList").innerHTML = favorites.items.length
     ? favorites.items.map((item) => `
-        <div class="list-item">
-          <div class="list-item-content" data-open-saved="${item.recipeSnapshot.slug}">
-            <div class="list-item-title">${escapeHtml(item.recipeSnapshot.title)}</div>
-            <p class="muted">⏱ ${item.recipeSnapshot.totalTimeMinutes} min • ★ ${item.recipeSnapshot.ratingAvg}</p>
-          </div>
+        <article class="saved-recipe-card">
+          <button class="saved-card-main" type="button" data-open-saved="${item.recipeSnapshot.slug}">
+            <span class="saved-card-type">Przepis</span>
+            <strong>${escapeHtml(item.recipeSnapshot.title)}</strong>
+            <span>${item.recipeSnapshot.totalTimeMinutes} min • ${item.recipeSnapshot.ratingAvg} ★</span>
+          </button>
           <button class="list-item-action-btn" data-remove-favorite="${item.recipeId}" title="Usuń z ulubionych">×</button>
-        </div>
+        </article>
       `).join("")
-    : `<div class="list-item">Brak zapisanych przepisów. Kliknij gwiazdkę przy przepisie!</div>`;
+    : `<div class="empty-state">
+         <strong>Brak ulubionych przepisów.</strong>
+         <span>Kliknij gwiazdkę przy przepisie, aby dodać go tutaj.</span>
+       </div>`;
 
   $("#shoppingList").innerHTML = lists.items.length
-    ? lists.items.map((list) => `
-        <div class="list-item">
-          <div class="list-item-content" data-view-shopping-list="${list._id || list.id}">
-            <div class="list-item-title">🛒 ${escapeHtml(list.name)}</div>
-            <p class="muted">${list.items.length} produktów (${list.items.filter(i => i.checked).length} kupionych)</p>
-          </div>
+    ? lists.items.map((list) => {
+        const checked = list.items.filter(i => i.checked).length;
+        const progress = list.items.length ? Math.round((checked / list.items.length) * 100) : 0;
+        return `
+        <article class="shopping-card">
+          <button class="shopping-card-main" type="button" data-view-shopping-list="${list._id || list.id}">
+            <span class="saved-card-type">Lista zakupów</span>
+            <strong>${escapeHtml(list.name)}</strong>
+            <span>${list.items.length} produktów • ${checked} kupionych</span>
+            <span class="progress-track"><span style="width:${progress}%"></span></span>
+          </button>
           <button class="list-item-action-btn" data-delete-shopping-list="${list._id || list.id}" title="Usuń listę">×</button>
-        </div>
-      `).join("")
-    : `<div class="list-item">Brak list zakupów. Wygeneruj listę z dowolnego przepisu!</div>`;
+        </article>
+      `;
+      }).join("")
+    : `<div class="empty-state">
+         <strong>Brak list zakupów.</strong>
+         <span>Wygeneruj listę z poziomu szczegółów dowolnego przepisu.</span>
+       </div>`;
 
-  $("#mealList").innerHTML = plans.items.length
-    ? plans.items.map((plan) => `
-        <div class="list-item">
-          <div class="list-item-content" data-open-saved="${plan.recipeSnapshot?.slug || ""}">
-            <div class="list-item-title">📅 ${formatMeal(plan.mealType)} • ${plan.plannedFor}</div>
-            <p class="muted">${escapeHtml(plan.recipeSnapshot?.title || "Przepis")}, ${plan.servings} porcji</p>
-          </div>
-          <button class="list-item-action-btn" data-delete-meal-plan="${plan._id || plan.id}" title="Usuń posiłek">×</button>
+  // Group plans by date for the calendar strip
+  const groupedPlans = {};
+  plans.items.forEach(plan => {
+    const dateStr = plan.plannedFor;
+    if (!groupedPlans[dateStr]) groupedPlans[dateStr] = [];
+    groupedPlans[dateStr].push(plan);
+  });
+
+  // Render Calendar Strip
+  const today = new Date();
+  const calendarStrip = $("#calendarStrip");
+  if (calendarStrip) {
+    const stripHtml = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(today.getDate() + i);
+      const dateStr = d.toISOString().slice(0, 10);
+
+      const dayName = d.toLocaleDateString("pl-PL", { weekday: "short" }); // e.g. "pn."
+      const dayNum = d.getDate();
+      const hasMeals = groupedPlans[dateStr] && groupedPlans[dateStr].length > 0;
+      const isSelected = state.selectedPlanDate === dateStr ? "active" : "";
+
+      stripHtml.push(`
+        <div class="calendar-day-btn ${isSelected}" data-calendar-day="${dateStr}">
+          <span class="day-name">${dayName}</span>
+          <strong class="day-number">${dayNum}</strong>
+          ${hasMeals ? `<span class="day-dot"></span>` : ""}
         </div>
-      `).join("")
-    : `<div class="list-item">Brak zaplanowanych posiłków na najbliższe dni.</div>`;
+      `);
+    }
+    calendarStrip.innerHTML = stripHtml.join("");
+  }
+
+  // Filter plans based on state.selectedPlanDate
+  let displayedPlans = plans.items;
+  if (state.selectedPlanDate) {
+    displayedPlans = plans.items.filter(p => p.plannedFor === state.selectedPlanDate);
+    $("#clearCalendarFilter")?.classList.remove("hidden");
+  } else {
+    $("#clearCalendarFilter")?.classList.add("hidden");
+  }
+
+  // Sort displayed plans chronologically
+  displayedPlans.sort((a, b) => a.plannedFor.localeCompare(b.plannedFor));
+
+  // Group displayed plans by date for rendering
+  const displayGrouped = {};
+  displayedPlans.forEach(plan => {
+    const dateStr = plan.plannedFor;
+    if (!displayGrouped[dateStr]) displayGrouped[dateStr] = [];
+    displayGrouped[dateStr].push(plan);
+  });
+
+  const sortedDisplayDates = Object.keys(displayGrouped).sort();
+
+  if (sortedDisplayDates.length) {
+    const mealTypeNames = {
+      breakfast: "Śniadanie",
+      lunch: "Lunch",
+      dinner: "Obiad",
+      supper: "Kolacja",
+      snack: "Przekąska",
+    };
+
+    $("#mealList").innerHTML = sortedDisplayDates.map(dateStr => {
+      const dateObj = new Date(dateStr);
+      const formattedDate = dateObj.toLocaleDateString("pl-PL", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      });
+
+      const dayMeals = displayGrouped[dateStr];
+      // Sort meals of the day by mealType order
+      const mealOrder = ["breakfast", "lunch", "dinner", "supper", "snack"];
+      dayMeals.sort((a, b) => mealOrder.indexOf(a.mealType) - mealOrder.indexOf(b.mealType));
+
+      return `
+        <div class="daily-schedule">
+          <div class="daily-schedule-header">
+            <span class="schedule-icon">📅</span>
+            <h3>${escapeHtml(formattedDate)}</h3>
+            <span class="meal-count-badge">${dayMeals.length} ${dayMeals.length === 1 ? 'posiłek' : dayMeals.length < 5 ? 'posiłki' : 'posiłków'}</span>
+          </div>
+          <div class="daily-meals-grid">
+            ${dayMeals.map(plan => `
+              <div class="premium-meal-card ${plan.mealType}">
+                <div class="meal-card-img-wrapper" data-open-saved="${plan.recipeSnapshot?.slug || ""}">       
+                  <img src="${plan.recipeSnapshot?.image || '/images/default.jpg'}" alt="${escapeHtml(plan.recipeSnapshot?.title || 'Przepis')}">
+                </div>
+                <div class="meal-card-content" data-open-saved="${plan.recipeSnapshot?.slug || ""}">
+                  <span class="meal-badge ${plan.mealType}">${mealTypeNames[plan.mealType] || plan.mealType}</span>
+                  <h4>${escapeHtml(plan.recipeSnapshot?.title || "Przepis")}</h4>
+                  <span class="meal-servings">🍽️ ${plan.servings} porcje</span>
+                </div>
+                <button class="meal-card-delete-btn" data-delete-meal-plan="${plan._id || plan.id}" title="Usuń z planu">×</button>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    }).join("");
+  } else {
+    $("#mealList").innerHTML = `
+      <div class="empty-state" style="text-align: center; padding: 32px 16px;">
+        <span style="font-size: 32px; display: block; margin-bottom: 8px;">🍽️</span>
+        <strong>Brak zaplanowanych posiłków</strong>
+        <span class="muted">${state.selectedPlanDate ? 'na ten dzień.' : 'na najbliższe dni.'} Użyj formularza po lewej stronie, aby dodać posiłki.</span>
+      </div>
+    `;
+  }
+}
+
+function renderFormIngredients() {
+  const container = $("#ingredientsList");
+  if (!container) return;
+  if (!state.formIngredients || state.formIngredients.length === 0) {
+    container.innerHTML = `<span class="muted" style="font-size: 13px;">Brak dodanych składników. Użyj pól poniżej, aby dodać.</span>`;
+    return;
+  }
+  container.innerHTML = state.formIngredients.map((ing, index) => `
+    <div style="display: flex; justify-content: space-between; align-items: center; background: #fff; padding: 6px 10px; border-radius: 6px; margin-bottom: 6px; border: 1px solid var(--line); font-size: 13px;">
+      <span><strong>${escapeHtml(ing.name)}</strong> - ${ing.quantity} ${escapeHtml(ing.unit)} ${ing.note ? `<span class="muted">(${escapeHtml(ing.note)})</span>` : ''}</span>
+      <button type="button" class="btn text-btn" onclick="removeFormIngredient(${index})" style="color: var(--accent); padding: 2px 6px; margin: 0; font-size: 12px; font-weight: 700; cursor: pointer; background: transparent; border: none;">Usuń ❌</button>
+    </div>
+  `).join("");
+}
+
+function renderFormSteps() {
+  const container = $("#stepsList");
+  if (!container) return;
+  if (!state.formSteps || state.formSteps.length === 0) {
+    container.innerHTML = `<span class="muted" style="font-size: 13px;">Brak dodanych kroków. Użyj pól poniżej, aby dodać.</span>`;
+    return;
+  }
+  container.innerHTML = state.formSteps.map((step, index) => `
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; background: #fff; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; border: 1px solid var(--line); font-size: 13px; gap: 10px;">
+      <div style="flex: 1;">
+        <span style="font-weight: 700; color: var(--accent); margin-right: 6px;">Krok ${step.order}:</span>
+        <span>${escapeHtml(step.instruction)}</span>
+        ${step.durationMinutes ? `<span class="muted" style="display: block; font-size: 11px; margin-top: 2px;">⏱️ Czas trwania: ${step.durationMinutes} min</span>` : ''}
+      </div>
+      <button type="button" class="btn text-btn" onclick="removeFormStep(${index})" style="color: var(--accent); padding: 2px 6px; margin: 0; font-size: 12px; font-weight: 700; cursor: pointer; background: transparent; border: none; white-space: nowrap;">Usuń ❌</button>
+    </div>
+  `).join("");
+}
+
+window.removeFormIngredient = function(index) {
+  state.formIngredients.splice(index, 1);
+  renderFormIngredients();
+};
+
+window.removeFormStep = function(index) {
+  state.formSteps.splice(index, 1);
+  // Recalculate step order to keep it logical
+  state.formSteps.forEach((step, i) => {
+    step.order = i + 1;
+  });
+  renderFormSteps();
+};
+
+function addIngredientFromForm() {
+  const nameInput = $("#ingNameInput");
+  const qtyInput = $("#ingQtyInput");
+  const unitInput = $("#ingUnitInput");
+  
+  if (!nameInput || !qtyInput || !unitInput) return;
+  
+  const name = nameInput.value.trim();
+  const quantity = Number(qtyInput.value);
+  const unit = unitInput.value.trim();
+  
+  if (!name) {
+    toast("Wpisz nazwę składnika!");
+    nameInput.focus();
+    return;
+  }
+  if (name.length < 2) {
+    toast("Nazwa składnika musi mieć co najmniej 2 znaki!");
+    nameInput.focus();
+    return;
+  }
+  if (isNaN(quantity) || quantity <= 0) {
+    toast("Ilość musi być liczbą dodatnią!");
+    qtyInput.focus();
+    return;
+  }
+  if (!unit) {
+    toast("Jednostka nie może być pusta!");
+    unitInput.focus();
+    return;
+  }
+  
+  state.formIngredients.push({ name, quantity, unit, note: "" });
+  renderFormIngredients();
+  
+  // Clear only ingredient name, keep unit/qty for rapid entry or set defaults
+  nameInput.value = "";
+  qtyInput.value = "1";
+  nameInput.focus();
+}
+
+function addStepFromForm() {
+  const instrInput = $("#stepInstructionInput");
+  const durInput = $("#stepDurationInput");
+  
+  if (!instrInput || !durInput) return;
+  
+  const instruction = instrInput.value.trim();
+  const durationMinutes = Number(durInput.value || 0);
+  
+  if (!instruction) {
+    toast("Wpisz opis kroku!");
+    instrInput.focus();
+    return;
+  }
+  if (instruction.length < 6) {
+    toast("Opis kroku musi mieć co najmniej 6 znaków!");
+    instrInput.focus();
+    return;
+  }
+  if (isNaN(durationMinutes) || durationMinutes < 0) {
+    toast("Czas trwania musi być liczbą nieujemną!");
+    durInput.focus();
+    return;
+  }
+  
+  const order = state.formSteps.length + 1;
+  state.formSteps.push({ order, instruction, durationMinutes });
+  renderFormSteps();
+  
+  // Reset step inputs
+  instrInput.value = "";
+  durInput.value = "5";
+  instrInput.focus();
 }
 
 function parseIngredients(value) {
@@ -634,6 +1075,39 @@ document.addEventListener("click", async (event) => {
   const deleteShoppingBtn = event.target.closest("[data-delete-shopping-list]");
   const toggleShoppingBtn = event.target.closest("[data-toggle-shopping]");
   const deleteMealBtn = event.target.closest("[data-delete-meal-plan]");
+  const calendarDayBtn = event.target.closest("[data-calendar-day]");
+  const clearCalendarFilter = event.target.closest("#clearCalendarFilter");
+  const editShoppingItemBtn = event.target.closest("[data-edit-shopping-item]");
+  const deleteShoppingItemBtn = event.target.closest("[data-delete-shopping-item]");
+
+  if (editShoppingItemBtn) {
+    event.stopPropagation();
+    await window.editShoppingItem?.(editShoppingItemBtn.dataset.editShoppingItem, Number(editShoppingItemBtn.dataset.itemIndex));
+    return;
+  }
+
+  if (deleteShoppingItemBtn) {
+    event.stopPropagation();
+    await window.deleteShoppingItemRow?.(deleteShoppingItemBtn.dataset.deleteShoppingItem, Number(deleteShoppingItemBtn.dataset.itemIndex));
+    return;
+  }
+
+  if (calendarDayBtn) {
+    const selectedDate = calendarDayBtn.dataset.calendarDay;
+    if (state.selectedPlanDate === selectedDate) {
+      state.selectedPlanDate = null; // Toggle off
+    } else {
+      state.selectedPlanDate = selectedDate;
+    }
+    await loadPrivatePanels();
+    return;
+  }
+
+  if (clearCalendarFilter) {
+    state.selectedPlanDate = null;
+    await loadPrivatePanels();
+    return;
+  }
 
   if (closeDialog) {
     document.getElementById(closeDialog.dataset.closeDialog)?.close();
@@ -795,29 +1269,84 @@ $("#searchForm").addEventListener("submit", (event) => {
 $("#recipeForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!requireLogin()) return;
-  
+
+  if (!state.formIngredients || state.formIngredients.length === 0) {
+    toast("Musisz dodać co najmniej jeden składnik!");
+    $("#ingNameInput").focus();
+    return;
+  }
+  if (!state.formSteps || state.formSteps.length === 0) {
+    toast("Musisz dodać co najmniej jeden krok przygotowania!");
+    $("#stepInstructionInput").focus();
+    return;
+  }
+  const submitBtn = $("#recipeForm button[type='submit']");
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Publikowanie... ⏳";
+  }
+
   try {
+    let images = [];
+    const imageUrl = $("#newImageUrl").value.trim();
+    if (imageUrl) {
+      try {
+        new URL(imageUrl);
+        images.push({
+          url: imageUrl,
+          alt: $("#newTitle").value.trim() || "Zdjęcie przepisu",
+          isMain: true
+        });
+      } catch (err) {
+        toast("Adres URL zdjęcia jest niepoprawny. Pozostaw puste lub wpisz prawidłowy adres URL.");
+        $("#newImageUrl").focus();
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Opublikuj przepis 🍳";
+        }
+        return;
+      }
+    }
+
+    const nutrition = {
+      calories: Number($("#nutCalories").value || 0),
+      protein: Number($("#nutProtein").value || 0),
+      fat: Number($("#nutFat").value || 0),
+      carbs: Number($("#nutCarbs").value || 0),
+    };
+
     const body = {
-      title: $("#newTitle").value,
-      description: $("#newDescription").value,
+      title: $("#newTitle").value.trim(),
+      description: $("#newDescription").value.trim(),
       categorySlug: $("#newCategory").value,
-      ingredients: parseIngredients($("#newIngredients").value),
-      steps: parseSteps($("#newSteps").value),
+      ingredients: state.formIngredients,
+      steps: state.formSteps,
       tags: listFromInput($("#newTags").value),
       diets: listFromInput($("#newDiets").value),
       prepTimeMinutes: Number($("#prepTime").value || 0),
       cookTimeMinutes: Number($("#cookTime").value || 0),
       servings: Number($("#servings").value || 1),
       difficulty: $("#difficulty").value,
+      images: images,
+      nutrition: nutrition,
     };
 
     await api("/recipes", { method: "POST", body: JSON.stringify(body) });
-    event.currentTarget.reset();
+    $("#recipeForm").reset();
+    state.formIngredients = [];
+    state.formSteps = [];
+    renderFormIngredients();
+    renderFormSteps();
     toast("Twój przepis został opublikowany!");
     await loadRecipes();
     location.hash = "home";
   } catch (err) {
     toast("Błąd publikacji: " + err.message);
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Opublikuj przepis 🍳";
+    }
   }
 });
 
@@ -922,7 +1451,7 @@ function handleRoute() {
   const hash = location.hash || "#home";
   
   // Hide all sections first
-  const sections = ["home", "recipeDetails", "planner", "add", "admin"];
+  const sections = ["home", "recipeDetails", "planner", "saved", "shopping", "add", "admin"];
   sections.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add("hidden");
@@ -953,8 +1482,28 @@ function handleRoute() {
     $("#home").classList.remove("hidden");
   } else if (hash === "#planner") {
     $("#planner").classList.remove("hidden");
+  } else if (hash === "#saved") {
+    $("#saved").classList.remove("hidden");
+  } else if (hash === "#shopping") {
+    $("#shopping").classList.remove("hidden");
   } else if (hash === "#add") {
     $("#add").classList.remove("hidden");
+    state.formIngredients = [];
+    state.formSteps = [];
+    renderFormIngredients();
+    renderFormSteps();
+    const form = $("#recipeForm");
+    if (form) {
+      form.reset();
+      // Explicitly reset number values to defaults
+      $("#prepTime").value = "10";
+      $("#cookTime").value = "20";
+      $("#servings").value = "2";
+      $("#nutCalories").value = "0";
+      $("#nutProtein").value = "0";
+      $("#nutFat").value = "0";
+      $("#nutCarbs").value = "0";
+    }
   } else if (hash === "#admin") {
     if (state.user?.role === "admin") {
       $("#admin").classList.remove("hidden");
@@ -980,6 +1529,49 @@ async function init() {
   updateAccount();
   const today = new Date().toISOString().slice(0, 10);
   $("#plannedFor").value = today;
+
+  // Bind list builder add buttons & keydown rapid entry listeners
+  const addIngBtn = $("#addIngBtn");
+  if (addIngBtn) {
+    addIngBtn.addEventListener("click", addIngredientFromForm);
+  }
+  const addStepBtn = $("#addStepBtn");
+  if (addStepBtn) {
+    addStepBtn.addEventListener("click", addStepFromForm);
+  }
+
+  const ingNameInput = $("#ingNameInput");
+  const ingQtyInput = $("#ingQtyInput");
+  const ingUnitInput = $("#ingUnitInput");
+  if (ingNameInput && ingQtyInput && ingUnitInput) {
+    [ingNameInput, ingQtyInput, ingUnitInput].forEach(input => {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          addIngredientFromForm();
+        }
+      });
+    });
+  }
+
+  const stepInstructionInput = $("#stepInstructionInput");
+  const stepDurationInput = $("#stepDurationInput");
+  if (stepInstructionInput) {
+    stepInstructionInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        addStepFromForm();
+      }
+    });
+  }
+  if (stepDurationInput) {
+    stepDurationInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addStepFromForm();
+      }
+    });
+  }
   
   // Setup toggle advanced filters accordion trigger
   const toggleFiltersBtn = $("#toggleFiltersBtn");
@@ -991,6 +1583,135 @@ async function init() {
         panel.classList.toggle("show");
       }
     });
+  }
+
+  // Wyszukiwarka przepisów w zakładce przepisy (instant suggestions)
+  const mainSearchInput = $("#q");
+  const mainSearchDropdown = $("#recipeSearchDropdown");
+
+  if (mainSearchInput && mainSearchDropdown) {
+    mainSearchInput.addEventListener("focus", async () => {
+      const recipes = await getAllRecipes();
+      renderMainDropdownItems(recipes);
+    });
+
+    mainSearchInput.addEventListener("input", async () => {
+      const term = mainSearchInput.value.toLowerCase().trim();
+      const recipes = await getAllRecipes();
+      if (!term) {
+        renderMainDropdownItems(recipes);
+        return;
+      }
+      const filtered = recipes.filter(r =>
+        r.title.toLowerCase().includes(term) ||
+        (r.description && r.description.toLowerCase().includes(term))
+      );
+      renderMainDropdownItems(filtered);
+    });
+
+    // Zamykanie listy po kliknięciu poza wyszukiwarką
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".search-input-wrapper")) {
+        mainSearchDropdown.classList.add("hidden");
+      }
+    });
+
+    mainSearchDropdown.addEventListener("click", (e) => {
+      const item = e.target.closest(".dropdown-item");
+      if (item && !item.classList.contains("empty")) {
+        const slug = item.dataset.selectSlug;
+        mainSearchInput.value = item.dataset.selectTitle;
+        mainSearchDropdown.classList.add("hidden");
+        location.hash = `#recipe/${slug}`;
+      }
+    });
+  }
+
+  function renderMainDropdownItems(recipes) {
+    if (!recipes.length) {
+      mainSearchDropdown.innerHTML = `<div class="dropdown-item empty">Brak przepisów o podanej nazwie</div>`;
+      mainSearchDropdown.classList.remove("hidden");
+      return;
+    }
+    mainSearchDropdown.innerHTML = recipes.slice(0, 10).map(recipe => {
+      const img = recipe.image || "";
+      return `
+        <div class="dropdown-item" data-select-slug="${recipe.slug}" data-select-title="${escapeHtml(recipe.title)}">
+          ${img ? `<img src="${img}" alt="${escapeHtml(recipe.title)}">` : `<div style="width:32px; height:32px; background:var(--accent-light); border-radius:4px; display:grid; place-items:center; font-size:12px; color:var(--accent);">🍳</div>`}
+          <div class="dropdown-item-text">
+            <strong>${escapeHtml(recipe.title)}</strong>
+            <span class="muted">${escapeHtml(recipe.categorySlug || "")} • ⏱ ${recipe.totalTimeMinutes} min</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+    mainSearchDropdown.classList.remove("hidden");
+  }
+
+  // Wyszukiwarka przepisów w planerze
+  const searchInput = $("#mealRecipeSearch");
+  const dropdown = $("#mealRecipeDropdown");
+  const hiddenInput = $("#mealRecipe");
+
+  if (searchInput && dropdown && hiddenInput) {
+    searchInput.addEventListener("focus", async () => {
+      const recipes = await getAllRecipes();
+      renderDropdownItems(recipes);
+    });
+
+    searchInput.addEventListener("input", async () => {
+      const term = searchInput.value.toLowerCase().trim();
+      const recipes = await getAllRecipes();
+      if (!term) {
+        renderDropdownItems(recipes);
+        hiddenInput.value = "";
+        return;
+      }
+      const filtered = recipes.filter(r =>
+        r.title.toLowerCase().includes(term) ||
+        (r.description && r.description.toLowerCase().includes(term))
+      );
+      renderDropdownItems(filtered);
+    });
+
+    // Zamykanie listy po kliknięciu poza wyszukiwarką
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".searchable-select-container")) {
+        dropdown.classList.add("hidden");
+      }
+    });
+
+    dropdown.addEventListener("click", (e) => {
+      const item = e.target.closest(".dropdown-item");
+      if (item && !item.classList.contains("empty")) {
+        const id = item.dataset.selectId;
+        const title = item.dataset.selectTitle;
+        searchInput.value = title;
+        hiddenInput.value = id;
+        dropdown.classList.add("hidden");
+      }
+    });
+  }
+
+  function renderDropdownItems(recipes) {
+    if (!recipes.length) {
+      dropdown.innerHTML = `<div class="dropdown-item empty">Brak przepisów o podanej nazwie</div>`;
+      dropdown.classList.remove("hidden");
+      return;
+    }
+    dropdown.innerHTML = recipes.slice(0, 10).map(recipe => {
+      const img = recipe.image || "";
+      return `
+        <div class="dropdown-item" data-select-id="${recipe.id}" data-select-title="${escapeHtml(recipe.title)}">
+          ${img ? `<img src="${img}" alt="${escapeHtml(recipe.title)}">` : `<div style="width:32px; height:32px; background:var(--accent-light); border-radius:4px; display:grid; place-items:center; font-size:12px; color:var(--accent);">🍳</div>`}
+          <div class="dropdown-item-text">
+            <strong>${escapeHtml(recipe.title)}</strong>
+            <span class="muted">${escapeHtml(recipe.categorySlug || "")} • ⏱ ${recipe.totalTimeMinutes} min</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+    dropdown.classList.remove("hidden");
   }
 
   await loadCategories();

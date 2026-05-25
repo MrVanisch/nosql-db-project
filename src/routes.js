@@ -339,14 +339,20 @@ router.patch("/recipes/:id", requireAuth, asyncHandler(async (req, res) => {
   if (!existing.authorId.equals(req.user._id) && req.user.role !== "admin") return errorResponse(res, 403, "FORBIDDEN", "Mozesz edytowac tylko wlasne przepisy");
 
   const data = parse(recipeSchema.partial(), req.body);
-  const update = { ...data, updatedAt: now() };
-  if (data.title) update.slug = await uniqueSlug(db.collection("recipes"), data.title, id);
-  if (data.ingredients) update.ingredients = data.ingredients.map((item) => ({ ...item, normalizedName: makeSlug(normalizeText(item.name)) }));
-  if (data.steps) update.steps = data.steps.sort((a, b) => a.order - b.order);
-  if (data.tags) update.tags = data.tags.map(makeSlug).filter(Boolean);
-  if (data.diets) update.diets = data.diets.map(makeSlug).filter(Boolean);
-  if (data.prepTimeMinutes !== undefined || data.cookTimeMinutes !== undefined) {
-    update.totalTimeMinutes = (data.prepTimeMinutes ?? existing.prepTimeMinutes) + (data.cookTimeMinutes ?? existing.cookTimeMinutes);
+  const update = { updatedAt: now() };
+  for (const key of Object.keys(data)) {
+    if (req.body[key] !== undefined) {
+      update[key] = data[key];
+    }
+  }
+
+  if (update.title) update.slug = await uniqueSlug(db.collection("recipes"), update.title, id);
+  if (update.ingredients) update.ingredients = update.ingredients.map((item) => ({ ...item, normalizedName: makeSlug(normalizeText(item.name)) }));
+  if (update.steps) update.steps = update.steps.sort((a, b) => a.order - b.order);
+  if (update.tags) update.tags = update.tags.map(makeSlug).filter(Boolean);
+  if (update.diets) update.diets = update.diets.map(makeSlug).filter(Boolean);
+  if (update.prepTimeMinutes !== undefined || update.cookTimeMinutes !== undefined) {
+    update.totalTimeMinutes = (update.prepTimeMinutes ?? existing.prepTimeMinutes) + (update.cookTimeMinutes ?? existing.cookTimeMinutes);
   }
   await db.collection("recipes").updateOne({ _id: id }, { $set: update });
   if (update.tags) await syncTags(db, update.tags);
@@ -554,6 +560,22 @@ router.get("/me/meal-plans", requireAuth, asyncHandler(async (req, res) => {
     if (req.query.to) query.plannedFor.$lte = String(req.query.to);
   }
   const items = await getDb().collection("mealPlans").find(query).sort({ plannedFor: 1, mealType: 1 }).toArray();
+
+  // Dynamically populate missing images for backward compatibility
+  const recipeIds = [...new Set(items.filter(item => !item.recipeSnapshot?.image).map(item => item.recipeId))];
+  if (recipeIds.length > 0) {
+    const recipes = await getDb().collection("recipes").find({ _id: { $in: recipeIds } }).toArray();
+    const recipeMap = new Map(recipes.map(r => [r._id.toString(), r]));
+    for (const item of items) {
+      if (item.recipeSnapshot && !item.recipeSnapshot.image) {
+        const recipe = recipeMap.get(item.recipeId.toString());
+        if (recipe) {
+          item.recipeSnapshot.image = recipe.images?.find((img) => img.isMain)?.url || recipe.images?.[0]?.url || "";
+        }
+      }
+    }
+  }
+
   res.json({ items });
 }));
 
@@ -572,7 +594,12 @@ router.post("/me/meal-plans", requireAuth, asyncHandler(async (req, res) => {
   const item = {
     userId: req.user._id,
     recipeId,
-    recipeSnapshot: { title: recipe.title, slug: recipe.slug, totalTimeMinutes: recipe.totalTimeMinutes },
+    recipeSnapshot: {
+      title: recipe.title,
+      slug: recipe.slug,
+      totalTimeMinutes: recipe.totalTimeMinutes,
+      image: recipe.images?.find((img) => img.isMain)?.url || recipe.images?.[0]?.url || ""
+    },
     plannedFor: data.plannedFor,
     mealType: data.mealType,
     servings: data.servings,

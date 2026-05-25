@@ -71,4 +71,4 @@ async function ensureIndexes(db) {
   ]);
 }
 
-module.exports = { connectDb, getDb, oid };
+module.exports = { connectDb, getDb, oid, ensureIndexes };
