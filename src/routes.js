@@ -100,10 +100,19 @@ async function uniqueSlug(collection, title, currentId) {
 }
 
 async function recalculateRating(db, recipeId) {
+  // === MONGODB AGGREGATION PIPELINE ===
+  // Agregacja (Aggregation Framework) służy do zaawansowanego przetwarzania i analizowania danych.
+  // Tutaj obliczamy statystyki ocen (średnią oraz ilość) na podstawie powiązanych dokumentów z kolekcji "ratings".
   const [stats] = await db.collection("ratings").aggregate([
+    // 1. $match: Etap filtrowania – dopasowuje oceny tylko do konkretnego ID przepisu (zmniejsza zbiór dokumentów na wejściu)
     { $match: { recipeId } },
+    // 2. $group: Etap grupowania – grupuje po ID przepisu, obliczając średnią ($avg) wartości oraz zliczając sumę dokumentów ($sum)
     { $group: { _id: "$recipeId", avg: { $avg: "$value" }, count: { $sum: 1 } } },
   ]).toArray();
+
+  // === MONGODB UPDATE & operator $set ===
+  // Aktualizuje dokument przepisu atomically. Używa operatora modyfikacji $set, aby zapisać wyliczoną średnią,
+  // ilość ocen oraz nową sygnaturę czasową modyfikacji dokumentu.
   await db.collection("recipes").updateOne(
     { _id: recipeId },
     { $set: { ratingAvg: stats ? Math.round(stats.avg * 10) / 10 : 0, ratingCount: stats?.count || 0, updatedAt: now() } },
@@ -244,20 +253,36 @@ router.get("/recipes", asyncHandler(async (req, res) => {
   const db = getDb();
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(48, Math.max(1, Number(req.query.limit || 12)));
+  
+  // === MONGODB DYNAMIC QUERY DOCUMENT BUILDING ===
+  // W MongoDB zapytania są dokumentami BSON. Dynamicznie budujemy ten dokument w zależności od filtrów z URL.
   const query = { status: "published" };
   const and = [];
 
+  // 1. Text Search & Indeks Tekstowy: operator $text z $search wyszukuje frazę w polach objętych indeksem tekstowym (tytuł, opis, tagi)
   if (req.query.q) and.push({ $text: { $search: String(req.query.q) } });
+  
   if (req.query.category) query.categorySlug = makeSlug(req.query.category);
   if (req.query.difficulty) query.difficulty = req.query.difficulty;
+  
+  // 2. Porównania Liczbowe ($lte / $gte): totalTimeMinutes <= maxTime oraz ratingAvg >= minRating
   if (req.query.maxTime) query.totalTimeMinutes = { $lte: Number(req.query.maxTime) };
   if (req.query.minRating) query.ratingAvg = { $gte: Number(req.query.minRating) };
+  
+  // 3. Tablice ($all): Wybiera dokumenty, których tablica "tags" zawiera WSZYSTKIE szukane elementy (Iloczyn zbiorów)
   const tags = cleanList(req.query.tags);
   if (tags.length) query.tags = { $all: tags };
+  
+  // 4. Tablice ($in): Wybiera dokumenty, których dieta należy do dowolnej z podanych w tablicy (Suma zbiorów)
   const diets = cleanList(req.query.diet || req.query.diets);
   if (diets.length) query.diets = { $in: diets };
+  
+  // 5. Zagnieżdżone Obiekty & Dot Notation: Przeszukuje tablicę zagnieżdżonych dokumentów składników
+  // po polu normalizedName, co efektywnie wykorzystuje indeks typu Multi-Key w MongoDB
   const ingredients = cleanList(req.query.ingredients);
   if (ingredients.length) query["ingredients.normalizedName"] = { $all: ingredients };
+  
+  // 6. Operator logiczny $and: Łączy warunki w logiczną koniunkcję (wymagane przy wyszukiwaniu tekstowym z innymi filtrami)
   if (and.length) query.$and = and;
 
   const sortMap = {
@@ -268,8 +293,14 @@ router.get("/recipes", asyncHandler(async (req, res) => {
   };
   const sort = sortMap[req.query.sort] || sortMap.newest;
 
+  // === MONGODB QUERY OPTIMIZATION WITH CURSOR METHODS ===
+  // Równolegle wykonujemy zapytanie pobierające dane oraz zliczające dokumenty (Promise.all)
   const [items, total] = await Promise.all([
+    // .find(): Zwraca kursor z pasującymi dokumentami
+    // .sort(): Wykonuje sortowanie (indeksowane pole chroni przed kosztownym sortowaniem w pamięci RAM)
+    // .skip() oraz .limit(): Narzędzia do stronicowania, ograniczają transfer danych z bazy do aplikacji
     db.collection("recipes").find(query).sort(sort).skip((page - 1) * limit).limit(limit).toArray(),
+    // .countDocuments(): Szybkie zliczanie pasujących dokumentów zoptymalizowane przez silnik bazy
     db.collection("recipes").countDocuments(query),
   ]);
 
@@ -316,6 +347,8 @@ router.post("/recipes", requireAuth, asyncHandler(async (req, res) => {
     createdAt: now(),
     updatedAt: now(),
   };
+  // === MONGODB INSERT OPERATION ===
+  // insertOne() dodaje nowy dokument przepisu do kolekcji i zwraca unikalny identyfikator _id (ObjectId)
   const result = await db.collection("recipes").insertOne(recipe);
   recipe._id = result.insertedId;
   await syncTags(db, tagSlugs);
@@ -324,8 +357,13 @@ router.post("/recipes", requireAuth, asyncHandler(async (req, res) => {
 
 router.get("/recipes/:slug", asyncHandler(async (req, res) => {
   const db = getDb();
+  // === MONGODB SINGLE READ WITH INDEX ===
+  // findOne() wyszukuje pojedynczy dokument po polu "slug", na którym leży indeks unikalny (Unique Index)
   const recipe = await db.collection("recipes").findOne({ slug: req.params.slug, status: "published" });
   if (!recipe) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono przepisu");
+  
+  // === MONGODB SORTED LIMIT QUERY ===
+  // find() z .sort() i .limit(8) pobiera 8 najnowszych, widocznych komentarzy dla danego przepisu
   const comments = await db.collection("comments").find({ recipeId: recipe._id, status: "visible" }).sort({ createdAt: -1 }).limit(8).toArray();
   res.json({ recipe: { ...recipe, id: recipe._id.toString() }, comments });
 }));
@@ -391,6 +429,11 @@ router.post("/recipes/:recipeId/comments", requireAuth, asyncHandler(async (req,
     createdAt: now(),
     updatedAt: now(),
   };
+  // === MONGODB TRANSACTIONAL ATOMICITY SIMULATION ===
+  // 1. insertOne: Dodaje nowy komentarz do bazy danych.
+  // 2. updateOne z operatorami modyfikacji $inc oraz $set:
+  //    - Operator $inc (Increment) zwiększa atomowo licznik komentarzy (commentCount) w przepisie o 1.
+  //    Dzięki temu unikamy kosztownego wczytywania, dodawania i ponownego zapisu całego przepisu.
   await getDb().collection("comments").insertOne(comment);
   await getDb().collection("recipes").updateOne({ _id: recipeId }, { $inc: { commentCount: 1 }, $set: { updatedAt: now() } });
   res.status(201).json({ item: comment });
@@ -413,6 +456,10 @@ router.delete("/comments/:id", requireAuth, asyncHandler(async (req, res) => {
   const comment = await getDb().collection("comments").findOne({ _id: id });
   if (!comment) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono komentarza");
   if (!comment.userId.equals(req.user._id) && req.user.role !== "admin") return errorResponse(res, 403, "FORBIDDEN", "Mozesz usuwac tylko wlasne komentarze");
+  
+  // === MONGODB SOFT DELETE & COUNTER DECREMENT ===
+  // 1. Zamiast fizycznego usunięcia rekordu z bazy, oznaczamy status komentarza jako "deleted" ($set).
+  // 2. Dekrementujemy (zmniejszamy o 1) licznik komentarzy w powiązanym przepisie atomically ($inc: -1).
   await getDb().collection("comments").updateOne({ _id: id }, { $set: { status: "deleted", updatedAt: now() } });
   await getDb().collection("recipes").updateOne({ _id: comment.recipeId }, { $inc: { commentCount: -1 } });
   res.json({ ok: true });
@@ -429,6 +476,12 @@ router.put("/recipes/:recipeId/rating", requireAuth, asyncHandler(async (req, re
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
   const { value } = parse(z.object({ value: z.coerce.number().int().min(1).max(5) }), req.body);
+  // === MONGODB UPSERT WITH $setOnInsert ===
+  // updateOne z opcją { upsert: true } (Update or Insert) realizuje logikę "dodaj lub edytuj":
+  // Jeśli użytkownik ocenił już dany przepis (dopasowanie po kluczu unikalnym { recipeId, userId }),
+  // ocena zostanie zaktualizowana ($set). Jeśli to pierwsza ocena – dokument zostanie automatycznie utworzony.
+  // - Operator $set: Działa w obu przypadkach (aktualizuje ocenę i datę modyfikacji).
+  // - Operator $setOnInsert: Ustawia pole createdAt TYLKO w przypadku tworzenia nowego dokumentu.
   await getDb().collection("ratings").updateOne(
     { recipeId, userId: req.user._id },
     { $set: { value, updatedAt: now() }, $setOnInsert: { createdAt: now() } },
@@ -649,6 +702,9 @@ router.get("/admin/summary", requireAdmin, asyncHandler(async (_req, res) => {
     newestComments,
     topRecipes,
   ] = await Promise.all([
+    // === MONGODB PERFORMANCE AND AGGREGATION VIA MULTIPLE QUERIES ===
+    // Wypychamy do silnika bazy danych serię asynchronicznych zapytań zliczających (countDocuments)
+    // oraz pobierających listy (find), wykonując je w pełni równolegle po stronie wątków bazy danych.
     db.collection("users").countDocuments({}),
     db.collection("users").countDocuments({ role: "admin" }),
     db.collection("users").countDocuments({ status: "blocked" }),
@@ -656,14 +712,18 @@ router.get("/admin/summary", requireAdmin, asyncHandler(async (_req, res) => {
     db.collection("recipes").countDocuments({ status: "published" }),
     db.collection("recipes").countDocuments({ status: "hidden" }),
     db.collection("comments").countDocuments({}),
+    // Operator $ne: Not Equal – zlicza komentarze o statusie innym niż "visible" (ukryte i usunięte)
     db.collection("comments").countDocuments({ status: { $ne: "visible" } }),
     db.collection("ratings").countDocuments({}),
     db.collection("favorites").countDocuments({}),
     db.collection("shoppingLists").countDocuments({}),
     db.collection("mealPlans").countDocuments({}),
     db.collection("reports").countDocuments({ status: "new" }),
+    // Projection (projekcja): projection: { passwordHash: 0 } to wykluczenie pola hasła ze zwracanego dokumentu
+    // ze względów bezpieczeństwa (wyświetlamy profil użytkownika bez narażania jego skrótu hasła)
     db.collection("users").find({}, { projection: { passwordHash: 0 } }).sort({ createdAt: -1 }).limit(5).toArray(),
     db.collection("comments").find({}).sort({ createdAt: -1 }).limit(5).toArray(),
+    // Projection & Multi-Field Sorting: Wybiera określone pola do podsumowania i sortuje malejąco po liczniku ulubień i ocenach
     db.collection("recipes").find({}, { projection: { title: 1, slug: 1, ratingAvg: 1, favoriteCount: 1, status: 1 } }).sort({ favoriteCount: -1, ratingAvg: -1 }).limit(5).toArray(),
   ]);
 
