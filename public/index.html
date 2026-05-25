@@ -6,7 +6,7 @@
     <title>CookFlow NoSQL</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -22,7 +22,13 @@
         <a href="#add">Dodaj</a>
       </nav>
       <div class="account">
-        <span id="userBadge" class="user-badge">Gosc</span>
+        <div id="userInfo" class="user-info hidden">
+          <div class="avatar-container" id="profileTrigger" title="Edytuj profil">
+            <img id="userAvatar" class="avatar-img" src="" alt="Avatar" style="display: none;" onload="this.style.display='block'; document.getElementById('avatarInitials').style.display='none';">
+            <span id="avatarInitials" class="avatar-initials">U</span>
+          </div>
+          <span id="userBadge" class="user-badge" title="Zalogowano">Gość</span>
+        </div>
         <button id="authButton" class="btn small">Logowanie</button>
         <button id="logoutButton" class="icon-btn hidden" title="Wyloguj" aria-label="Wyloguj">↪</button>
       </div>
@@ -144,16 +150,43 @@
     <dialog id="authDialog">
       <form method="dialog" class="dialog-card">
         <button class="icon-btn close" value="cancel" aria-label="Zamknij">×</button>
-        <h2>Konto uzytkownika</h2>
+        <h2>Konto użytkownika</h2>
         <div class="tabs">
           <button id="loginTab" class="tab active" type="button">Logowanie</button>
           <button id="registerTab" class="tab" type="button">Rejestracja</button>
         </div>
         <div id="authError" class="error hidden"></div>
-        <label class="register-only hidden">Nazwa uzytkownika<input id="authUsername" autocomplete="username"></label>
+        <label class="register-only hidden">Nazwa użytkownika<input id="authUsername" autocomplete="username"></label>
         <label>E-mail<input id="authEmail" type="email" autocomplete="email"></label>
         <label>Haslo<input id="authPassword" type="password" autocomplete="current-password"></label>
         <button id="submitAuth" class="btn primary" type="button">Zaloguj</button>
+      </form>
+    </dialog>
+
+    <dialog id="shoppingListDialog">
+      <div class="dialog-card">
+        <button class="icon-btn close" onclick="document.getElementById('shoppingListDialog').close();" aria-label="Zamknij">×</button>
+        <h2 id="shoppingListName">Lista zakupów</h2>
+        <p id="shoppingListMeta" class="muted"></p>
+        <div id="shoppingListItems" class="shopping-items-list">
+          <!-- Dynamic checkboxes go here -->
+        </div>
+        <div class="dialog-actions">
+          <button id="deleteShoppingListBtn" class="btn danger" type="button">Usuń listę</button>
+          <button class="btn secondary" type="button" onclick="document.getElementById('shoppingListDialog').close();">Zamknij</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="profileDialog">
+      <form id="profileForm" class="dialog-card">
+        <button class="icon-btn close" type="button" onclick="document.getElementById('profileDialog').close();" aria-label="Zamknij">×</button>
+        <h2>Mój Profil</h2>
+        <div id="profileError" class="error hidden"></div>
+        <label>Nazwa wyświetlana<input id="profileDisplayName" required minlength="2" placeholder="np. MasterChef"></label>
+        <label>Biogram / O sobie<textarea id="profileBio" placeholder="Opisz swoje kulinarne pasje..."></textarea></label>
+        <label>Link do awatara (URL)<input id="profileAvatarUrl" type="url" placeholder="https://images.unsplash.com/..."></label>
+        <button id="submitProfile" class="btn primary" type="submit">Zapisz zmiany</button>
       </form>
     </dialog>
 
