@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>CookFlow NoSQL</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#home" aria-label="CookFlow">
+        <span class="brand-mark">CF</span>
+        <span>CookFlow</span>
+      </a>
+      <nav class="nav">
+        <a href="#home">Przepisy</a>
+        <a href="#planner">Plan</a>
+        <a href="#saved">Zapisane</a>
+        <a href="#add">Dodaj</a>
+      </nav>
+      <div class="account">
+        <span id="userBadge" class="user-badge">Gosc</span>
+        <button id="authButton" class="btn small">Logowanie</button>
+        <button id="logoutButton" class="icon-btn hidden" title="Wyloguj" aria-label="Wyloguj">↪</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-content">
+          <p class="eyebrow">NoSQL recipes app</p>
+          <h1>Przepisy, zakupy i plan posilkow w jednym szybkim panelu</h1>
+          <p class="hero-copy">Wyszukuj po skladnikach, czasie, tagach i diecie. Zapisuj ulubione przepisy, generuj liste zakupow i planuj posilki bez przeladowywania strony.</p>
+          <form id="searchForm" class="search-panel">
+            <div class="search-row">
+              <label>
+                <span>Szukaj</span>
+                <input id="q" name="q" placeholder="np. makaron kurczak">
+              </label>
+              <label>
+                <span>Kategoria</span>
+                <select id="category" name="category"></select>
+              </label>
+              <label>
+                <span>Czas do</span>
+                <input id="maxTime" name="maxTime" type="number" min="1" placeholder="30">
+              </label>
+              <button class="btn primary" type="submit">Szukaj</button>
+            </div>
+            <div class="filter-row">
+              <input id="ingredients" name="ingredients" placeholder="Skladniki: szpinak, makaron">
+              <input id="tags" name="tags" placeholder="Tagi: szybki-obiad">
+              <select id="sort" name="sort">
+                <option value="newest">Najnowsze</option>
+                <option value="rating">Najwyzej oceniane</option>
+                <option value="popular">Popularne</option>
+                <option value="time">Najszybsze</option>
+              </select>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section id="home" class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Katalog</p>
+            <h2>Przepisy</h2>
+          </div>
+          <span id="resultCount" class="muted"></span>
+        </div>
+        <div id="recipeGrid" class="recipe-grid"></div>
+      </section>
+
+      <section id="recipeDetails" class="section detail-shell hidden"></section>
+
+      <section id="planner" class="section app-grid">
+        <div class="panel">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Kalendarz</p>
+              <h2>Plan posilkow</h2>
+            </div>
+          </div>
+          <form id="mealForm" class="stack">
+            <select id="mealRecipe"></select>
+            <div class="two">
+              <input id="plannedFor" type="date" required>
+              <select id="mealType">
+                <option value="breakfast">Sniadanie</option>
+                <option value="lunch">Lunch</option>
+                <option value="dinner">Obiad</option>
+                <option value="supper">Kolacja</option>
+                <option value="snack">Przekaska</option>
+              </select>
+            </div>
+            <input id="mealServings" type="number" min="1" value="2" placeholder="Porcje">
+            <button class="btn primary" type="submit">Dodaj do planu</button>
+          </form>
+          <div id="mealList" class="list"></div>
+        </div>
+
+        <div id="saved" class="panel">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Konto</p>
+              <h2>Ulubione i zakupy</h2>
+            </div>
+          </div>
+          <div id="favoriteList" class="list"></div>
+          <div id="shoppingList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="add" class="section">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Tworzenie</p>
+            <h2>Dodaj przepis</h2>
+          </div>
+        </div>
+        <form id="recipeForm" class="editor">
+          <div class="form-grid">
+            <label>Tytul<input id="newTitle" required minlength="3"></label>
+            <label>Kategoria<select id="newCategory" required></select></label>
+            <label>Tagi<input id="newTags" placeholder="makaron, szybki-obiad"></label>
+            <label>Diety<input id="newDiets" placeholder="vegetarian"></label>
+            <label>Czas przygotowania<input id="prepTime" type="number" min="0" value="10"></label>
+            <label>Czas gotowania<input id="cookTime" type="number" min="0" value="20"></label>
+            <label>Porcje<input id="servings" type="number" min="1" value="2"></label>
+            <label>Trudnosc<select id="difficulty"><option value="easy">Latwy</option><option value="medium">Sredni</option><option value="hard">Trudny</option></select></label>
+          </div>
+          <label>Opis<textarea id="newDescription" required minlength="12"></textarea></label>
+          <label>Skladniki<textarea id="newIngredients" placeholder="makaron penne | 250 | g&#10;kurczak | 300 | g" required></textarea></label>
+          <label>Kroki<textarea id="newSteps" placeholder="Ugotuj makaron.&#10;Podsmaz skladniki." required></textarea></label>
+          <button class="btn primary" type="submit">Opublikuj przepis</button>
+        </form>
+      </section>
+    </main>
+
+    <dialog id="authDialog">
+      <form method="dialog" class="dialog-card">
+        <button class="icon-btn close" value="cancel" aria-label="Zamknij">×</button>
+        <h2>Konto uzytkownika</h2>
+        <div class="tabs">
+          <button id="loginTab" class="tab active" type="button">Logowanie</button>
+          <button id="registerTab" class="tab" type="button">Rejestracja</button>
+        </div>
+        <div id="authError" class="error hidden"></div>
+        <label class="register-only hidden">Nazwa uzytkownika<input id="authUsername" autocomplete="username"></label>
+        <label>E-mail<input id="authEmail" type="email" autocomplete="email"></label>
+        <label>Haslo<input id="authPassword" type="password" autocomplete="current-password"></label>
+        <button id="submitAuth" class="btn primary" type="button">Zaloguj</button>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

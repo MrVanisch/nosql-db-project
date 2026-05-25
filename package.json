@@ -1,0 +1,42 @@
+{
+  "name": "nosql-db-project",
+  "version": "1.0.0",
+  "description": "Projekt z przedmiotu Zaawansowane Bazy Danych. System sluzy do publikowania, wyszukiwania, oceniania i zapisywania przepisow kulinarnych.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/seed.js",
+    "db:check": "node src/check-db.js",
+    "test": "node --check src/server.js && node --check src/routes.js && node --check src/seed.js && node -e \"require('./src/server').createApp(); console.log('http app ok')\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MrVanisch/nosql-db-project.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MrVanisch/nosql-db-project/issues"
+  },
+  "homepage": "https://github.com/MrVanisch/nosql-db-project#readme",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "compression": "^1.8.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.2.0",
+    "morgan": "^1.10.1",
+    "slugify": "^1.6.9",
+    "zod": "^4.4.3"
+  }
+}
