@@ -20,6 +20,7 @@
         <a href="#planner">Plan</a>
         <a href="#saved">Zapisane</a>
         <a href="#add">Dodaj</a>
+        <a id="adminNavLink" class="hidden" href="#admin">Admin</a>
       </nav>
       <div class="account">
         <div id="userInfo" class="user-info hidden">
@@ -150,6 +151,27 @@
           <label>Kroki<textarea id="newSteps" placeholder="Ugotuj makaron.&#10;Podsmaz skladniki." required></textarea></label>
           <button class="btn primary" type="submit">Opublikuj przepis</button>
         </form>
+      </section>
+
+      <section id="admin" class="section admin-section hidden">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Administracja</p>
+            <h2>Panel administratora</h2>
+          </div>
+          <button id="refreshAdminBtn" class="btn secondary" type="button">Odswiez</button>
+        </div>
+
+        <div id="adminStats" class="admin-stats"></div>
+
+        <div class="admin-tabs">
+          <button class="admin-tab active" type="button" data-admin-tab="users">Uzytkownicy</button>
+          <button class="admin-tab" type="button" data-admin-tab="comments">Komentarze</button>
+          <button class="admin-tab" type="button" data-admin-tab="recipes">Przepisy</button>
+          <button class="admin-tab" type="button" data-admin-tab="overview">Przeglad</button>
+        </div>
+
+        <div id="adminPanel" class="admin-panel"></div>
       </section>
     </main>
 

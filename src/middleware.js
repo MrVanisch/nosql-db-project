@@ -31,6 +31,9 @@ function requireAuth(req, res, next) {
   if (!req.user) {
     return errorResponse(res, 401, "UNAUTHORIZED", "Wymagane logowanie");
   }
+  if (req.user.status === "blocked") {
+    return errorResponse(res, 403, "ACCOUNT_BLOCKED", "Konto zostalo zablokowane przez administratora");
+  }
   next();
 }
 

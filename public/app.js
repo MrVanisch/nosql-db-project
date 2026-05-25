@@ -9,6 +9,8 @@ const state = {
   page: 1,
   pages: 1,
   lastParams: new URLSearchParams(),
+  adminTab: "users",
+  adminData: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -41,9 +43,12 @@ function formatMeal(value) {
 
 function updateAccount() {
   const isLogged = Boolean(state.user);
+  const isAdmin = state.user?.role === "admin";
   $("#authButton").classList.toggle("hidden", isLogged);
   $("#logoutButton").classList.toggle("hidden", !isLogged);
   $("#userInfo").classList.toggle("hidden", !isLogged);
+  $("#adminNavLink").classList.toggle("hidden", !isAdmin);
+  $("#admin").classList.toggle("hidden", !isAdmin);
 
   if (isLogged) {
     const name = state.user.profile?.displayName || state.user.username;
@@ -64,6 +69,126 @@ function updateAccount() {
       initials.style.display = "grid";
     }
   }
+}
+
+async function loadAdminPanel() {
+  if (state.user?.role !== "admin") return;
+  const [summary, users, comments, recipes] = await Promise.all([
+    api("/admin/summary"),
+    api("/admin/users?limit=30"),
+    api("/admin/comments?limit=30"),
+    api("/admin/recipes?limit=30"),
+  ]);
+  state.adminData = { summary, users, comments, recipes };
+  renderAdminStats(summary.stats);
+  renderAdminPanel();
+}
+
+function renderAdminStats(stats) {
+  $("#adminStats").innerHTML = [
+    ["Uzytkownicy", stats.users, `${stats.admins} adminow`],
+    ["Przepisy", stats.recipes, `${stats.publishedRecipes} publicznych`],
+    ["Komentarze", stats.comments, `${stats.hiddenComments} ukrytych/usunietych`],
+    ["Aktywnosc", stats.favorites + stats.ratings, `${stats.shoppingLists} list zakupow`],
+    ["Plany", stats.mealPlans, "zaplanowane posilki"],
+    ["Zgloszenia", stats.openReports, "otwarte sprawy"],
+  ].map(([label, value, meta]) => `
+    <article class="admin-stat">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      <small>${meta}</small>
+    </article>
+  `).join("");
+}
+
+function renderAdminPanel() {
+  if (!state.adminData) return;
+  document.querySelectorAll(".admin-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.adminTab === state.adminTab);
+  });
+  const panel = $("#adminPanel");
+  if (state.adminTab === "users") {
+    panel.innerHTML = `
+      <div class="admin-table-head"><h3>Uzytkownicy</h3><span>${state.adminData.users.total} kont</span></div>
+      <div class="admin-table">
+        ${state.adminData.users.items.map((user) => `
+          <div class="admin-row">
+            <div>
+              <strong>${escapeHtml(user.profile?.displayName || user.username)}</strong>
+              <p>${escapeHtml(user.email)} • @${escapeHtml(user.username)}</p>
+            </div>
+            <span class="status-pill">${user.role}</span>
+            <span class="status-pill ${user.status === "blocked" ? "danger" : ""}">${user.status || "active"}</span>
+            <div class="admin-actions">
+              <button class="btn small secondary" data-admin-user-role="${user._id}" data-role="${user.role === "admin" ? "user" : "admin"}">${user.role === "admin" ? "Rola user" : "Rola admin"}</button>
+              <button class="btn small ${user.status === "blocked" ? "secondary" : "danger"}" data-admin-user-status="${user._id}" data-status="${user.status === "blocked" ? "active" : "blocked"}">${user.status === "blocked" ? "Odblokuj" : "Blokuj"}</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+    return;
+  }
+  if (state.adminTab === "comments") {
+    panel.innerHTML = `
+      <div class="admin-table-head"><h3>Moderacja komentarzy</h3><span>${state.adminData.comments.total} komentarzy</span></div>
+      <div class="admin-table">
+        ${state.adminData.comments.items.map((comment) => `
+          <div class="admin-row comment-row">
+            <div>
+              <strong>${escapeHtml(comment.userSnapshot?.displayName || comment.userSnapshot?.username || "Uzytkownik")}</strong>
+              <p>${escapeHtml(comment.body)}</p>
+            </div>
+            <span class="status-pill ${comment.status !== "visible" ? "danger" : ""}">${comment.status}</span>
+            <div class="admin-actions">
+              <button class="btn small secondary" data-admin-comment="${comment._id}" data-status="visible">Pokaz</button>
+              <button class="btn small secondary" data-admin-comment="${comment._id}" data-status="hidden">Ukryj</button>
+              <button class="btn small danger" data-admin-comment="${comment._id}" data-status="deleted">Usun</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+    return;
+  }
+  if (state.adminTab === "recipes") {
+    panel.innerHTML = `
+      <div class="admin-table-head"><h3>Zarzadzanie przepisami</h3><span>${state.adminData.recipes.total} rekordow</span></div>
+      <div class="admin-table">
+        ${state.adminData.recipes.items.map((recipe) => `
+          <div class="admin-row">
+            <div>
+              <strong>${escapeHtml(recipe.title)}</strong>
+              <p>${recipe.categorySlug} • ${recipe.ratingAvg || 0} ★ • ${recipe.favoriteCount || 0} zapisow</p>
+            </div>
+            <span class="status-pill ${recipe.status !== "published" ? "danger" : ""}">${recipe.status}</span>
+            <div class="admin-actions">
+              <button class="btn small secondary" data-admin-recipe="${recipe._id}" data-status="published">Publikuj</button>
+              <button class="btn small secondary" data-admin-recipe="${recipe._id}" data-status="hidden">Ukryj</button>
+              <button class="btn small danger" data-admin-recipe="${recipe._id}" data-status="draft">Szkic</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+    return;
+  }
+  panel.innerHTML = `
+    <div class="admin-overview">
+      <div>
+        <h3>Najpopularniejsze przepisy</h3>
+        ${state.adminData.summary.topRecipes.map((recipe) => `<p><strong>${escapeHtml(recipe.title)}</strong><span>${recipe.favoriteCount || 0} zapisow • ${recipe.ratingAvg || 0} ★</span></p>`).join("")}
+      </div>
+      <div>
+        <h3>Najnowsi uzytkownicy</h3>
+        ${state.adminData.summary.newestUsers.map((user) => `<p><strong>${escapeHtml(user.profile?.displayName || user.username)}</strong><span>${escapeHtml(user.email)}</span></p>`).join("")}
+      </div>
+      <div>
+        <h3>Ostatnie komentarze</h3>
+        ${state.adminData.summary.newestComments.map((comment) => `<p><strong>${escapeHtml(comment.userSnapshot?.displayName || "Uzytkownik")}</strong><span>${escapeHtml(comment.body).slice(0, 110)}</span></p>`).join("")}
+      </div>
+    </div>
+  `;
 }
 
 async function loadCategories() {
@@ -423,6 +548,7 @@ async function submitAuth() {
     $("#authDialog").close();
     updateAccount();
     await loadPrivatePanels();
+    await loadAdminPanel();
     toast("Pomyślnie zalogowano!");
   } catch (err) {
     $("#authError").textContent = err.message;
@@ -493,6 +619,53 @@ document.addEventListener("click", async (event) => {
     } catch (err) {
       toast(err.message);
     }
+  }
+
+  const adminTab = event.target.closest("[data-admin-tab]");
+  if (adminTab) {
+    state.adminTab = adminTab.dataset.adminTab;
+    renderAdminPanel();
+  }
+
+  const userRole = event.target.closest("[data-admin-user-role]");
+  if (userRole) {
+    await api(`/admin/users/${userRole.dataset.adminUserRole}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role: userRole.dataset.role }),
+    });
+    await loadAdminPanel();
+    toast("Rola uzytkownika zostala zmieniona");
+  }
+
+  const userStatus = event.target.closest("[data-admin-user-status]");
+  if (userStatus) {
+    await api(`/admin/users/${userStatus.dataset.adminUserStatus}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: userStatus.dataset.status }),
+    });
+    await loadAdminPanel();
+    toast("Status konta zostal zmieniony");
+  }
+
+  const adminComment = event.target.closest("[data-admin-comment]");
+  if (adminComment) {
+    await api(`/admin/comments/${adminComment.dataset.adminComment}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: adminComment.dataset.status }),
+    });
+    await loadAdminPanel();
+    toast("Komentarz zmoderowany");
+  }
+
+  const adminRecipe = event.target.closest("[data-admin-recipe]");
+  if (adminRecipe) {
+    await api(`/admin/recipes/${adminRecipe.dataset.adminRecipe}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: adminRecipe.dataset.status }),
+    });
+    await loadAdminPanel();
+    await loadRecipes(state.lastParams);
+    toast("Status przepisu zostal zmieniony");
   }
 });
 
@@ -602,7 +775,13 @@ $("#logoutButton").addEventListener("click", () => {
   localStorage.removeItem("user");
   updateAccount();
   loadPrivatePanels();
+  $("#adminPanel").innerHTML = "";
+  $("#adminStats").innerHTML = "";
   toast("Zostałeś wylogowany.");
+});
+
+$("#refreshAdminBtn").addEventListener("click", () => {
+  loadAdminPanel().then(() => toast("Panel administratora odswiezony")).catch((err) => toast(err.message));
 });
 
 document.addEventListener("submit", async (event) => {
@@ -633,6 +812,7 @@ async function init() {
   await loadCategories();
   await loadRecipes();
   await loadPrivatePanels();
+  await loadAdminPanel();
 }
 
 init().catch((err) => toast(err.message));

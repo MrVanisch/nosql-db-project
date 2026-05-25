@@ -888,6 +888,180 @@ dialog::backdrop {
   flex: 1;
 }
 
+/* Admin panel */
+.admin-section {
+  background: linear-gradient(180deg, rgba(15, 76, 58, .06), transparent 340px);
+}
+
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.admin-stat {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-stat span,
+.admin-stat small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-stat strong {
+  display: block;
+  margin: 8px 0 5px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 34px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.admin-tab {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 900;
+  transition: var(--transition);
+}
+
+.admin-tab.active,
+.admin-tab:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.admin-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.admin-table-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #fffdf8;
+}
+
+.admin-table-head h3 {
+  margin: 0;
+}
+
+.admin-table-head span {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.admin-table {
+  display: grid;
+}
+
+.admin-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto minmax(260px, auto);
+  gap: 14px;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-row:last-child {
+  border-bottom: 0;
+}
+
+.admin-row.comment-row {
+  grid-template-columns: minmax(260px, 1fr) auto minmax(260px, auto);
+}
+
+.admin-row p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+  font-size: 14px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.status-pill.danger {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.admin-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.admin-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  padding: 20px;
+}
+
+.admin-overview > div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: #fffdf8;
+}
+
+.admin-overview p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-overview p:last-child {
+  border-bottom: 0;
+}
+
+.admin-overview span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 /* Animations */
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -910,11 +1084,17 @@ dialog::backdrop {
   .facts { align-self: stretch; }
   .topbar { flex-wrap: wrap; gap: 16px; }
   .nav { order: 3; width: 100%; justify-content: space-between; gap: 8px; }
+  .admin-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-row,
+  .admin-row.comment-row,
+  .admin-overview { grid-template-columns: 1fr; }
+  .admin-actions { justify-content: flex-start; }
 }
 
 @media (max-width: 880px) {
   .app-grid { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr 1fr; }
+  .admin-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 580px) {
@@ -925,4 +1105,5 @@ dialog::backdrop {
   h1 { font-size: 34px; }
   .search-row, .filter-row { flex-direction: column; align-items: stretch; gap: 10px; }
   .hero-stats { grid-template-columns: 1fr; }
+  .admin-stats { grid-template-columns: 1fr; }
 }

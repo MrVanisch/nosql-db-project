@@ -150,6 +150,9 @@ router.post("/auth/login", asyncHandler(async (req, res) => {
   if (!user || !(await verifyPassword(data.password, user.passwordHash))) {
     return errorResponse(res, 401, "INVALID_CREDENTIALS", "Niepoprawny e-mail lub haslo");
   }
+  if (user.status === "blocked") {
+    return errorResponse(res, 403, "ACCOUNT_BLOCKED", "Konto zostalo zablokowane przez administratora");
+  }
   res.json({ user: publicUser(user), token: signToken(user) });
 }));
 
@@ -597,6 +600,129 @@ router.delete("/me/meal-plans/:id", requireAuth, asyncHandler(async (req, res) =
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
   await getDb().collection("mealPlans").deleteOne({ _id: id, userId: req.user._id });
   res.json({ ok: true });
+}));
+
+router.get("/admin/summary", requireAdmin, asyncHandler(async (_req, res) => {
+  const db = getDb();
+  const [
+    users,
+    admins,
+    blockedUsers,
+    recipes,
+    publishedRecipes,
+    hiddenRecipes,
+    comments,
+    hiddenComments,
+    ratings,
+    favorites,
+    shoppingLists,
+    mealPlans,
+    reports,
+    newestUsers,
+    newestComments,
+    topRecipes,
+  ] = await Promise.all([
+    db.collection("users").countDocuments({}),
+    db.collection("users").countDocuments({ role: "admin" }),
+    db.collection("users").countDocuments({ status: "blocked" }),
+    db.collection("recipes").countDocuments({}),
+    db.collection("recipes").countDocuments({ status: "published" }),
+    db.collection("recipes").countDocuments({ status: "hidden" }),
+    db.collection("comments").countDocuments({}),
+    db.collection("comments").countDocuments({ status: { $ne: "visible" } }),
+    db.collection("ratings").countDocuments({}),
+    db.collection("favorites").countDocuments({}),
+    db.collection("shoppingLists").countDocuments({}),
+    db.collection("mealPlans").countDocuments({}),
+    db.collection("reports").countDocuments({ status: "new" }),
+    db.collection("users").find({}, { projection: { passwordHash: 0 } }).sort({ createdAt: -1 }).limit(5).toArray(),
+    db.collection("comments").find({}).sort({ createdAt: -1 }).limit(5).toArray(),
+    db.collection("recipes").find({}, { projection: { title: 1, slug: 1, ratingAvg: 1, favoriteCount: 1, status: 1 } }).sort({ favoriteCount: -1, ratingAvg: -1 }).limit(5).toArray(),
+  ]);
+
+  res.json({
+    stats: {
+      users,
+      admins,
+      blockedUsers,
+      recipes,
+      publishedRecipes,
+      hiddenRecipes,
+      comments,
+      hiddenComments,
+      ratings,
+      favorites,
+      shoppingLists,
+      mealPlans,
+      openReports: reports,
+    },
+    newestUsers,
+    newestComments,
+    topRecipes,
+  });
+}));
+
+router.get("/admin/users", requireAdmin, asyncHandler(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit || 30)));
+  const query = {};
+  if (req.query.q) {
+    const phrase = String(req.query.q).trim();
+    query.$or = [
+      { username: { $regex: phrase, $options: "i" } },
+      { email: { $regex: phrase, $options: "i" } },
+      { "profile.displayName": { $regex: phrase, $options: "i" } },
+    ];
+  }
+  if (req.query.role) query.role = req.query.role;
+  if (req.query.status) query.status = req.query.status;
+
+  const [items, total] = await Promise.all([
+    getDb().collection("users").find(query, { projection: { passwordHash: 0 } }).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
+    getDb().collection("users").countDocuments(query),
+  ]);
+  res.json({ items, page, limit, total, pages: Math.ceil(total / limit) });
+}));
+
+router.patch("/admin/users/:id", requireAdmin, asyncHandler(async (req, res) => {
+  const id = oid(req.params.id);
+  if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
+  if (id.equals(req.user._id) && req.body.status === "blocked") {
+    return errorResponse(res, 400, "INVALID_OPERATION", "Nie mozna zablokowac wlasnego konta");
+  }
+  const schema = z.object({
+    role: z.enum(["user", "admin"]).optional(),
+    status: z.enum(["active", "blocked"]).optional(),
+  });
+  const data = parse(schema, req.body);
+  await getDb().collection("users").updateOne({ _id: id }, { $set: { ...data, updatedAt: now() } });
+  res.json({ ok: true });
+}));
+
+router.get("/admin/comments", requireAdmin, asyncHandler(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
+  const query = {};
+  if (req.query.status) query.status = req.query.status;
+  if (req.query.q) query.body = { $regex: String(req.query.q).trim(), $options: "i" };
+  const [items, total] = await Promise.all([
+    getDb().collection("comments").find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
+    getDb().collection("comments").countDocuments(query),
+  ]);
+  res.json({ items, page, limit, total, pages: Math.ceil(total / limit) });
+}));
+
+router.get("/admin/recipes", requireAdmin, asyncHandler(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
+  const query = {};
+  if (req.query.status) query.status = req.query.status;
+  if (req.query.q) query.title = { $regex: String(req.query.q).trim(), $options: "i" };
+  const [items, total] = await Promise.all([
+    getDb().collection("recipes").find(query, { projection: { ingredients: 0, steps: 0, nutrition: 0 } }).sort({ updatedAt: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
+    getDb().collection("recipes").countDocuments(query),
+  ]);
+  res.json({ items, page, limit, total, pages: Math.ceil(total / limit) });
 }));
 
 router.get("/admin/reports", requireAdmin, asyncHandler(async (_req, res) => {
