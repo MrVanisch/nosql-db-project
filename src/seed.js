@@ -1,7 +1,16 @@
+/**
+ * Skrypt inicjalizujacy (seed) baze danych.
+ * Strategia:
+ * 1. Tworzy kategorie, jesli nie istnieja (upsert).
+ * 2. Tworzy konto administratora demonstracyjnego.
+ * 3. Generuje szeroki zestaw przepisow na podstawie zdefiniowanych szablonow i wariantow,
+ *    aby wypelnic baze realistycznymi danymi testowymi.
+ */
 const { connectDb } = require("./db");
 const { hashPassword, makeSlug, normalizeText, now } = require("./utils");
 const crypto = require("crypto");
 
+// Definicja podstawowych kategorii dan
 const categories = [
   { name: "Sniadania", slug: "sniadania", description: "Energetyczny start dnia", order: 10, isActive: true },
   { name: "Obiady", slug: "obiady", description: "Dania glowne na co dzien", order: 20, isActive: true },

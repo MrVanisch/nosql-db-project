@@ -13,8 +13,17 @@ const {
   now,
 } = require("./utils");
 
+/**
+ * Kontroler tras (Routes) dla aplikacji CookFlow.
+ * Obsługuje autentykację, zarządzanie przepisami, komentarzami, ocenami,
+ * listami zakupów oraz planerem posiłków przy użyciu bazy MongoDB.
+ */
 const router = express.Router();
 
+// --- SCHEMATY WALIDACJI (Zod) ---
+// Zod zapewnia bezpieczeństwo typów i walidację danych wejściowych (runtime type checking).
+
+/** Schemat rejestracji nowego użytkownika */
 const registerSchema = z.object({
   username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9_]+$/),
   email: z.string().trim().email().max(160).transform((value) => value.toLowerCase()),
@@ -22,11 +31,13 @@ const registerSchema = z.object({
   displayName: z.string().trim().max(80).optional(),
 });
 
+/** Schemat logowania */
 const loginSchema = z.object({
   email: z.string().trim().email().transform((value) => value.toLowerCase()),
   password: z.string().min(1),
 });
 
+/** Schemat pojedynczego składnika w przepisie */
 const ingredientSchema = z.object({
   name: z.string().trim().min(2).max(100),
   quantity: z.coerce.number().positive().max(100000),
@@ -34,12 +45,14 @@ const ingredientSchema = z.object({
   note: z.string().trim().max(120).optional().default(""),
 });
 
+/** Schemat kroku przygotowania przepisu */
 const stepSchema = z.object({
   order: z.coerce.number().int().positive(),
   instruction: z.string().trim().min(6).max(1200),
   durationMinutes: z.coerce.number().int().min(0).max(600).optional().default(0),
 });
 
+/** Kompleksowy schemat przepisu kulinarnych */
 const recipeSchema = z.object({
   title: z.string().trim().min(3).max(140),
   description: z.string().trim().min(12).max(1200),
@@ -67,6 +80,14 @@ const recipeSchema = z.object({
   status: z.enum(["draft", "published"]).default("published"),
 });
 
+// --- FUNKCJE POMOCNICZE ---
+
+/**
+ * Parsuje i waliduje dane wejściowe względem schematu Zod.
+ * @param {z.ZodSchema} schema - Schemat walidacji.
+ * @param {any} input - Dane do walidacji.
+ * @throws {Error} VALIDATION_ERROR jeśli dane są niepoprawne.
+ */
 function parse(schema, input) {
   const result = schema.safeParse(input);
   if (!result.success) {
@@ -82,12 +103,19 @@ function parse(schema, input) {
   return result.data;
 }
 
+/** Czyści i normalizuje listę wartości (np. tagi) */
 function cleanList(value) {
   if (!value) return [];
   const raw = Array.isArray(value) ? value : String(value).split(",");
   return raw.map((item) => makeSlug(item)).filter(Boolean);
 }
 
+/**
+ * Generuje unikalny slug dla przepisu, unikając kolizji w bazie.
+ * @param {import('mongodb').Collection} collection - Kolekcja MongoDB.
+ * @param {string} title - Tytuł przepisu.
+ * @param {import('mongodb').ObjectId} currentId - Opcjonalne ID aktualnego dokumentu (przy edycji).
+ */
 async function uniqueSlug(collection, title, currentId) {
   const base = makeSlug(title) || "przepis";
   let slug = base;
@@ -99,30 +127,38 @@ async function uniqueSlug(collection, title, currentId) {
   return slug;
 }
 
+/**
+ * Przelicza średnią ocenę i liczbę głosów dla przepisu przy użyciu Agregacji MongoDB.
+ * @param {import('mongodb').Db} db - Instancja bazy danych.
+ * @param {import('mongodb').ObjectId} recipeId - ID przepisu.
+ */
 async function recalculateRating(db, recipeId) {
   // === MONGODB AGGREGATION PIPELINE ===
-  // Agregacja (Aggregation Framework) służy do zaawansowanego przetwarzania i analizowania danych.
-  // Tutaj obliczamy statystyki ocen (średnią oraz ilość) na podstawie powiązanych dokumentów z kolekcji "ratings".
+  // Agregacja służy do zaawansowanego przetwarzania danych po stronie serwera bazy.
   const [stats] = await db.collection("ratings").aggregate([
-    // 1. $match: Etap filtrowania – dopasowuje oceny tylko do konkretnego ID przepisu (zmniejsza zbiór dokumentów na wejściu)
+    // 1. $match: Filtrujemy tylko oceny dla konkretnego przepisu.
     { $match: { recipeId } },
-    // 2. $group: Etap grupowania – grupuje po ID przepisu, obliczając średnią ($avg) wartości oraz zliczając sumę dokumentów ($sum)
+    // 2. $group: Grupujemy wszystkie oceny, obliczając średnią ($avg) i sumę wystąpień ($sum).
     { $group: { _id: "$recipeId", avg: { $avg: "$value" }, count: { $sum: 1 } } },
   ]).toArray();
 
-  // === MONGODB UPDATE & operator $set ===
-  // Aktualizuje dokument przepisu atomically. Używa operatora modyfikacji $set, aby zapisać wyliczoną średnią,
-  // ilość ocen oraz nową sygnaturę czasową modyfikacji dokumentu.
+  // Aktualizacja atomowa: $set ustawia nowe wartości statystyk w dokumencie przepisu.
   await db.collection("recipes").updateOne(
     { _id: recipeId },
     { $set: { ratingAvg: stats ? Math.round(stats.avg * 10) / 10 : 0, ratingCount: stats?.count || 0, updatedAt: now() } },
   );
 }
 
+// --- TRASY PUBLICZNE & SYSTEMOWE ---
+
+/** Sprawdzenie stanu usługi */
 router.get("/health", (_req, res) => {
   res.json({ ok: true, service: "recipes-nosql", time: new Date().toISOString() });
 });
 
+// --- AUTENTYKACJA ---
+
+/** Rejestracja użytkownika */
 router.post("/auth/register", asyncHandler(async (req, res) => {
   const data = parse(registerSchema, req.body);
   const db = getDb();
@@ -144,6 +180,7 @@ router.post("/auth/register", asyncHandler(async (req, res) => {
     const result = await db.collection("users").insertOne(user);
     user._id = result.insertedId;
   } catch (err) {
+    // Obsługa błędu unikalności (Duplicate Key Error - kod 11000)
     if (err.code === 11000) {
       return errorResponse(res, 409, "DUPLICATE_USER", "E-mail albo nazwa uzytkownika jest juz zajeta");
     }
@@ -153,6 +190,7 @@ router.post("/auth/register", asyncHandler(async (req, res) => {
   res.status(201).json({ user: publicUser(user), token: signToken(user) });
 }));
 
+/** Logowanie użytkownika */
 router.post("/auth/login", asyncHandler(async (req, res) => {
   const data = parse(loginSchema, req.body);
   const user = await getDb().collection("users").findOne({ email: data.email });
@@ -165,18 +203,24 @@ router.post("/auth/login", asyncHandler(async (req, res) => {
   res.json({ user: publicUser(user), token: signToken(user) });
 }));
 
+/** Odświeżenie tokenu JWT */
 router.post("/auth/refresh", requireAuth, asyncHandler(async (req, res) => {
   res.json({ user: publicUser(req.user), token: signToken(req.user) });
 }));
 
+/** Wylogowanie (uproszczone, klient usuwa token) */
 router.post("/auth/logout", requireAuth, (_req, res) => {
   res.json({ ok: true });
 });
 
+// --- PROFIL UŻYTKOWNIKA ---
+
+/** Pobranie danych zalogowanego użytkownika */
 router.get("/users/me", requireAuth, (req, res) => {
   res.json({ user: publicUser(req.user) });
 });
 
+/** Aktualizacja profilu zalogowanego użytkownika */
 router.patch("/users/me", requireAuth, asyncHandler(async (req, res) => {
   const schema = z.object({
     displayName: z.string().trim().min(2).max(80).optional(),
@@ -185,9 +229,12 @@ router.patch("/users/me", requireAuth, asyncHandler(async (req, res) => {
   });
   const data = parse(schema, req.body);
   const $set = { updatedAt: now() };
+  
+  // Dynamiczne budowanie obiektu aktualizacji przy użyciu Dot Notation
   if (data.displayName !== undefined) $set["profile.displayName"] = data.displayName;
   if (data.bio !== undefined) $set["profile.bio"] = data.bio;
   if (data.avatarUrl !== undefined) $set["profile.avatarUrl"] = data.avatarUrl;
+  
   await getDb().collection("users").updateOne(
     { _id: req.user._id },
     { $set },
@@ -196,12 +243,15 @@ router.patch("/users/me", requireAuth, asyncHandler(async (req, res) => {
   res.json({ user: publicUser(user) });
 }));
 
+/** Pobranie profilu publicznego użytkownika */
 router.get("/users/:username", asyncHandler(async (req, res) => {
+  // Projekcja: wykluczamy wrażliwe dane jak skrót hasła czy email
   const user = await getDb().collection("users").findOne({ username: req.params.username }, { projection: { passwordHash: 0, email: 0 } });
   if (!user) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono uzytkownika");
   res.json({ user: publicUser(user) });
 }));
 
+/** Pobranie przepisów danego użytkownika */
 router.get("/users/:username/recipes", asyncHandler(async (req, res) => {
   const user = await getDb().collection("users").findOne({ username: req.params.username });
   if (!user) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono uzytkownika");
@@ -213,11 +263,15 @@ router.get("/users/:username/recipes", asyncHandler(async (req, res) => {
   res.json({ items: recipes.map(recipeCard) });
 }));
 
+// --- KATEGORIE I TAGI ---
+
+/** Lista aktywnych kategorii */
 router.get("/categories", asyncHandler(async (_req, res) => {
   const items = await getDb().collection("categories").find({ isActive: { $ne: false } }).sort({ order: 1, name: 1 }).toArray();
   res.json({ items });
 }));
 
+/** Dodanie nowej kategorii (tylko Admin) */
 router.post("/categories", requireAdmin, asyncHandler(async (req, res) => {
   const schema = z.object({ name: z.string().trim().min(2).max(80), description: z.string().trim().max(300).default(""), order: z.coerce.number().int().default(100) });
   const data = parse(schema, req.body);
@@ -226,6 +280,7 @@ router.post("/categories", requireAdmin, asyncHandler(async (req, res) => {
   res.status(201).json({ item });
 }));
 
+/** Edycja kategorii (tylko Admin) */
 router.patch("/categories/:id", requireAdmin, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -236,53 +291,50 @@ router.patch("/categories/:id", requireAdmin, asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/** Popularne tagi */
 router.get("/tags", asyncHandler(async (_req, res) => {
   const items = await getDb().collection("tags").find({}).sort({ usageCount: -1, name: 1 }).limit(80).toArray();
   res.json({ items });
 }));
 
-router.post("/tags", requireAdmin, asyncHandler(async (req, res) => {
-  const schema = z.object({ name: z.string().trim().min(2).max(60) });
-  const data = parse(schema, req.body);
-  const item = { name: data.name, slug: makeSlug(data.name), usageCount: 0 };
-  await getDb().collection("tags").insertOne(item);
-  res.status(201).json({ item });
-}));
+// --- PRZEPISY (GŁÓWNA LOGIKA) ---
 
+/**
+ * Katalog przepisów z zaawansowanym filtrowaniem i wyszukiwaniem pełnotekstowym.
+ */
 router.get("/recipes", asyncHandler(async (req, res) => {
   const db = getDb();
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(48, Math.max(1, Number(req.query.limit || 12)));
   
   // === MONGODB DYNAMIC QUERY DOCUMENT BUILDING ===
-  // W MongoDB zapytania są dokumentami BSON. Dynamicznie budujemy ten dokument w zależności od filtrów z URL.
+  // Dynamicznie budujemy dokument zapytania na podstawie parametrów URL.
   const query = { status: "published" };
   const and = [];
 
-  // 1. Text Search & Indeks Tekstowy: operator $text z $search wyszukuje frazę w polach objętych indeksem tekstowym (tytuł, opis, tagi)
+  // 1. Full-Text Search: Wykorzystuje indeks tekstowy na polach tytułu, opisu i tagów.
   if (req.query.q) and.push({ $text: { $search: String(req.query.q) } });
   
   if (req.query.category) query.categorySlug = makeSlug(req.query.category);
   if (req.query.difficulty) query.difficulty = req.query.difficulty;
   
-  // 2. Porównania Liczbowe ($lte / $gte): totalTimeMinutes <= maxTime oraz ratingAvg >= minRating
+  // 2. Operatory porównania: $lte (Less Than or Equal), $gte (Greater Than or Equal).
   if (req.query.maxTime) query.totalTimeMinutes = { $lte: Number(req.query.maxTime) };
   if (req.query.minRating) query.ratingAvg = { $gte: Number(req.query.minRating) };
   
-  // 3. Tablice ($all): Wybiera dokumenty, których tablica "tags" zawiera WSZYSTKIE szukane elementy (Iloczyn zbiorów)
+  // 3. Tablice ($all): Wybiera dokumenty zawierające wszystkie podane tagi.
   const tags = cleanList(req.query.tags);
   if (tags.length) query.tags = { $all: tags };
   
-  // 4. Tablice ($in): Wybiera dokumenty, których dieta należy do dowolnej z podanych w tablicy (Suma zbiorów)
+  // 4. Tablice ($in): Wybiera dokumenty zawierające przynajmniej jedną z podanych diet.
   const diets = cleanList(req.query.diet || req.query.diets);
   if (diets.length) query.diets = { $in: diets };
   
-  // 5. Zagnieżdżone Obiekty & Dot Notation: Przeszukuje tablicę zagnieżdżonych dokumentów składników
-  // po polu normalizedName, co efektywnie wykorzystuje indeks typu Multi-Key w MongoDB
+  // 5. Zagnieżdżone obiekty (Dot Notation): Przeszukiwanie znormalizowanych nazw składników.
   const ingredients = cleanList(req.query.ingredients);
   if (ingredients.length) query["ingredients.normalizedName"] = { $all: ingredients };
   
-  // 6. Operator logiczny $and: Łączy warunki w logiczną koniunkcję (wymagane przy wyszukiwaniu tekstowym z innymi filtrami)
+  // Łączenie warunków logicznych operatorami $and.
   if (and.length) query.$and = and;
 
   const sortMap = {
@@ -293,20 +345,16 @@ router.get("/recipes", asyncHandler(async (req, res) => {
   };
   const sort = sortMap[req.query.sort] || sortMap.newest;
 
-  // === MONGODB QUERY OPTIMIZATION WITH CURSOR METHODS ===
-  // Równolegle wykonujemy zapytanie pobierające dane oraz zliczające dokumenty (Promise.all)
+  // Równoległe pobieranie danych i liczenie dokumentów dla paginacji.
   const [items, total] = await Promise.all([
-    // .find(): Zwraca kursor z pasującymi dokumentami
-    // .sort(): Wykonuje sortowanie (indeksowane pole chroni przed kosztownym sortowaniem w pamięci RAM)
-    // .skip() oraz .limit(): Narzędzia do stronicowania, ograniczają transfer danych z bazy do aplikacji
     db.collection("recipes").find(query).sort(sort).skip((page - 1) * limit).limit(limit).toArray(),
-    // .countDocuments(): Szybkie zliczanie pasujących dokumentów zoptymalizowane przez silnik bazy
     db.collection("recipes").countDocuments(query),
   ]);
 
   res.json({ items: items.map(recipeCard), page, limit, total, pages: Math.ceil(total / limit) });
 }));
 
+/** Utworzenie nowego przepisu */
 router.post("/recipes", requireAuth, asyncHandler(async (req, res) => {
   const data = parse(recipeSchema, req.body);
   const db = getDb();
@@ -318,7 +366,7 @@ router.post("/recipes", requireAuth, asyncHandler(async (req, res) => {
   const tagSlugs = data.tags.map(makeSlug).filter(Boolean);
   const recipe = {
     authorId: req.user._id,
-    authorSnapshot: {
+    authorSnapshot: { // Denormalizacja danych autora dla wydajności odczytu
       username: req.user.username,
       displayName: req.user.profile?.displayName || req.user.username,
       avatarUrl: req.user.profile?.avatarUrl || "",
@@ -347,33 +395,33 @@ router.post("/recipes", requireAuth, asyncHandler(async (req, res) => {
     createdAt: now(),
     updatedAt: now(),
   };
-  // === MONGODB INSERT OPERATION ===
-  // insertOne() dodaje nowy dokument przepisu do kolekcji i zwraca unikalny identyfikator _id (ObjectId)
+
   const result = await db.collection("recipes").insertOne(recipe);
   recipe._id = result.insertedId;
   await syncTags(db, tagSlugs);
   res.status(201).json({ item: recipeCard(recipe), recipe });
 }));
 
+/** Pobranie pojedynczego przepisu po slugu wraz z komentarzami */
 router.get("/recipes/:slug", asyncHandler(async (req, res) => {
   const db = getDb();
-  // === MONGODB SINGLE READ WITH INDEX ===
-  // findOne() wyszukuje pojedynczy dokument po polu "slug", na którym leży indeks unikalny (Unique Index)
   const recipe = await db.collection("recipes").findOne({ slug: req.params.slug, status: "published" });
   if (!recipe) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono przepisu");
   
-  // === MONGODB SORTED LIMIT QUERY ===
-  // find() z .sort() i .limit(8) pobiera 8 najnowszych, widocznych komentarzy dla danego przepisu
+  // Pobranie najnowszych komentarzy w osobnym zapytaniu (brak "Joinów" w NoSQL - model relacyjny zastąpiony referencją)
   const comments = await db.collection("comments").find({ recipeId: recipe._id, status: "visible" }).sort({ createdAt: -1 }).limit(8).toArray();
   res.json({ recipe: { ...recipe, id: recipe._id.toString() }, comments });
 }));
 
+/** Aktualizacja przepisu */
 router.patch("/recipes/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
   const db = getDb();
   const existing = await db.collection("recipes").findOne({ _id: id });
   if (!existing) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono przepisu");
+  
+  // Sprawdzenie uprawnień: tylko autor lub admin
   if (!existing.authorId.equals(req.user._id) && req.user.role !== "admin") return errorResponse(res, 403, "FORBIDDEN", "Mozesz edytowac tylko wlasne przepisy");
 
   const data = parse(recipeSchema.partial(), req.body);
@@ -384,6 +432,7 @@ router.patch("/recipes/:id", requireAuth, asyncHandler(async (req, res) => {
     }
   }
 
+  // Logika biznesowa przy aktualizacji pól wyliczanych
   if (update.title) update.slug = await uniqueSlug(db.collection("recipes"), update.title, id);
   if (update.ingredients) update.ingredients = update.ingredients.map((item) => ({ ...item, normalizedName: makeSlug(normalizeText(item.name)) }));
   if (update.steps) update.steps = update.steps.sort((a, b) => a.order - b.order);
@@ -392,11 +441,13 @@ router.patch("/recipes/:id", requireAuth, asyncHandler(async (req, res) => {
   if (update.prepTimeMinutes !== undefined || update.cookTimeMinutes !== undefined) {
     update.totalTimeMinutes = (update.prepTimeMinutes ?? existing.prepTimeMinutes) + (update.cookTimeMinutes ?? existing.cookTimeMinutes);
   }
+  
   await db.collection("recipes").updateOne({ _id: id }, { $set: update });
   if (update.tags) await syncTags(db, update.tags);
   res.json({ ok: true });
 }));
 
+/** Miękkie usuwanie przepisu (zmiana statusu na szkic) */
 router.delete("/recipes/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -407,6 +458,9 @@ router.delete("/recipes/:id", requireAuth, asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// --- KOMENTARZE ---
+
+/** Pobranie komentarzy dla przepisu z paginacją */
 router.get("/recipes/:recipeId/comments", asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -416,6 +470,7 @@ router.get("/recipes/:recipeId/comments", asyncHandler(async (req, res) => {
   res.json({ items, page, limit });
 }));
 
+/** Dodanie komentarza z atomową inkrementacją licznika */
 router.post("/recipes/:recipeId/comments", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -429,16 +484,15 @@ router.post("/recipes/:recipeId/comments", requireAuth, asyncHandler(async (req,
     createdAt: now(),
     updatedAt: now(),
   };
-  // === MONGODB TRANSACTIONAL ATOMICITY SIMULATION ===
-  // 1. insertOne: Dodaje nowy komentarz do bazy danych.
-  // 2. updateOne z operatorami modyfikacji $inc oraz $set:
-  //    - Operator $inc (Increment) zwiększa atomowo licznik komentarzy (commentCount) w przepisie o 1.
-  //    Dzięki temu unikamy kosztownego wczytywania, dodawania i ponownego zapisu całego przepisu.
+
+  // 1. Zapis komentarza
   await getDb().collection("comments").insertOne(comment);
+  // 2. Atomowe zwiększenie licznika komentarzy w dokumencie przepisu ($inc)
   await getDb().collection("recipes").updateOne({ _id: recipeId }, { $inc: { commentCount: 1 }, $set: { updatedAt: now() } });
   res.status(201).json({ item: comment });
 }));
 
+/** Edycja komentarza */
 router.patch("/comments/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -450,6 +504,7 @@ router.patch("/comments/:id", requireAuth, asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/** Usuwanie komentarza z dekrementacją licznika */
 router.delete("/comments/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -457,40 +512,36 @@ router.delete("/comments/:id", requireAuth, asyncHandler(async (req, res) => {
   if (!comment) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono komentarza");
   if (!comment.userId.equals(req.user._id) && req.user.role !== "admin") return errorResponse(res, 403, "FORBIDDEN", "Mozesz usuwac tylko wlasne komentarze");
   
-  // === MONGODB SOFT DELETE & COUNTER DECREMENT ===
-  // 1. Zamiast fizycznego usunięcia rekordu z bazy, oznaczamy status komentarza jako "deleted" ($set).
-  // 2. Dekrementujemy (zmniejszamy o 1) licznik komentarzy w powiązanym przepisie atomically ($inc: -1).
+  // Zmiana statusu zamiast fizycznego usunięcia (soft delete)
   await getDb().collection("comments").updateOne({ _id: id }, { $set: { status: "deleted", updatedAt: now() } });
+  // Atomowe zmniejszenie licznika ($inc: -1)
   await getDb().collection("recipes").updateOne({ _id: comment.recipeId }, { $inc: { commentCount: -1 } });
   res.json({ ok: true });
 }));
 
-router.patch("/admin/comments/:id/status", requireAdmin, asyncHandler(async (req, res) => {
-  const id = oid(req.params.id);
-  const { status } = parse(z.object({ status: z.enum(["visible", "hidden", "deleted"]) }), req.body);
-  await getDb().collection("comments").updateOne({ _id: id }, { $set: { status, updatedAt: now() } });
-  res.json({ ok: true });
-}));
+// --- OCENY ---
 
+/** Wystawienie oceny przy użyciu operacji Upsert */
 router.put("/recipes/:recipeId/rating", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
   const { value } = parse(z.object({ value: z.coerce.number().int().min(1).max(5) }), req.body);
-  // === MONGODB UPSERT WITH $setOnInsert ===
-  // updateOne z opcją { upsert: true } (Update or Insert) realizuje logikę "dodaj lub edytuj":
-  // Jeśli użytkownik ocenił już dany przepis (dopasowanie po kluczu unikalnym { recipeId, userId }),
-  // ocena zostanie zaktualizowana ($set). Jeśli to pierwsza ocena – dokument zostanie automatycznie utworzony.
-  // - Operator $set: Działa w obu przypadkach (aktualizuje ocenę i datę modyfikacji).
-  // - Operator $setOnInsert: Ustawia pole createdAt TYLKO w przypadku tworzenia nowego dokumentu.
+  
+  // === MONGODB UPSERT (Update or Insert) ===
+  // Jeśli rekord istnieje, aktualizuje go. Jeśli nie, tworzy nowy.
   await getDb().collection("ratings").updateOne(
     { recipeId, userId: req.user._id },
-    { $set: { value, updatedAt: now() }, $setOnInsert: { createdAt: now() } },
+    { 
+      $set: { value, updatedAt: now() }, 
+      $setOnInsert: { createdAt: now() } // Ustawiane tylko przy tworzeniu nowego dokumentu
+    },
     { upsert: true },
   );
   await recalculateRating(getDb(), recipeId);
   res.json({ ok: true });
 }));
 
+/** Usunięcie własnej oceny */
 router.delete("/recipes/:recipeId/rating", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -499,6 +550,7 @@ router.delete("/recipes/:recipeId/rating", requireAuth, asyncHandler(async (req,
   res.json({ ok: true });
 }));
 
+/** Pobranie własnej oceny dla przepisu */
 router.get("/recipes/:recipeId/rating/me", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -506,20 +558,25 @@ router.get("/recipes/:recipeId/rating/me", requireAuth, asyncHandler(async (req,
   res.json({ rating });
 }));
 
+// --- ULUBIONE ---
+
+/** Lista ulubionych przepisów zalogowanego użytkownika */
 router.get("/me/favorites", requireAuth, asyncHandler(async (req, res) => {
   const items = await getDb().collection("favorites").find({ userId: req.user._id }).sort({ createdAt: -1 }).toArray();
   res.json({ items });
 }));
 
+/** Dodanie przepisu do ulubionych z denormalizacją (Snapshot) */
 router.post("/me/favorites/:recipeId", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
   const recipe = await getDb().collection("recipes").findOne({ _id: recipeId });
   if (!recipe) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono przepisu");
+  
   const favorite = {
     userId: req.user._id,
     recipeId,
-    recipeSnapshot: {
+    recipeSnapshot: { // Zapisujemy podstawowe dane przepisu, aby uniknąć Joinów przy listowaniu
       title: recipe.title,
       slug: recipe.slug,
       mainImageUrl: recipe.images?.[0]?.url || "",
@@ -530,13 +587,15 @@ router.post("/me/favorites/:recipeId", requireAuth, asyncHandler(async (req, res
   };
   try {
     await getDb().collection("favorites").insertOne(favorite);
+    // Inkrementacja licznika ulubień w dokumencie przepisu
     await getDb().collection("recipes").updateOne({ _id: recipeId }, { $inc: { favoriteCount: 1 } });
   } catch (err) {
-    if (err.code !== 11000) throw err;
+    if (err.code !== 11000) throw err; // Ignoruj jeśli już jest w ulubionych
   }
   res.status(201).json({ ok: true });
 }));
 
+/** Usunięcie przepisu z ulubionych */
 router.delete("/me/favorites/:recipeId", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -545,11 +604,15 @@ router.delete("/me/favorites/:recipeId", requireAuth, asyncHandler(async (req, r
   res.json({ ok: true });
 }));
 
+// --- LISTY ZAKUPÓW ---
+
+/** Pobranie list zakupów użytkownika */
 router.get("/me/shopping-lists", requireAuth, asyncHandler(async (req, res) => {
   const items = await getDb().collection("shoppingLists").find({ userId: req.user._id }).sort({ updatedAt: -1 }).toArray();
   res.json({ items });
 }));
 
+/** Ręczne utworzenie listy zakupów */
 router.post("/me/shopping-lists", requireAuth, asyncHandler(async (req, res) => {
   const schema = z.object({
     name: z.string().trim().min(2).max(120),
@@ -561,12 +624,14 @@ router.post("/me/shopping-lists", requireAuth, asyncHandler(async (req, res) => 
   res.status(201).json({ item });
 }));
 
+/** Automatyczne generowanie listy zakupów na podstawie przepisu i liczby porcji */
 router.post("/recipes/:recipeId/shopping-list", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
   const { servings } = parse(z.object({ servings: z.coerce.number().int().min(1).max(64) }), req.body);
   const recipe = await getDb().collection("recipes").findOne({ _id: recipeId });
   if (!recipe) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono przepisu");
+  
   const multiplier = servings / recipe.servings;
   const list = {
     userId: req.user._id,
@@ -586,6 +651,7 @@ router.post("/recipes/:recipeId/shopping-list", requireAuth, asyncHandler(async 
   res.status(201).json({ item: list });
 }));
 
+/** Aktualizacja listy zakupów (np. odznaczanie przedmiotów) */
 router.patch("/me/shopping-lists/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -598,6 +664,7 @@ router.patch("/me/shopping-lists/:id", requireAuth, asyncHandler(async (req, res
   res.json({ ok: true });
 }));
 
+/** Usunięcie listy zakupów */
 router.delete("/me/shopping-lists/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -605,8 +672,12 @@ router.delete("/me/shopping-lists/:id", requireAuth, asyncHandler(async (req, re
   res.json({ ok: true });
 }));
 
+// --- PLANER POSIŁKÓW ---
+
+/** Pobranie planu posiłków z filtrowaniem po dacie */
 router.get("/me/meal-plans", requireAuth, asyncHandler(async (req, res) => {
   const query = { userId: req.user._id };
+  // Filtrowanie zakresu dat przy użyciu operatorów $gte i $lte
   if (req.query.from || req.query.to) {
     query.plannedFor = {};
     if (req.query.from) query.plannedFor.$gte = String(req.query.from);
@@ -614,7 +685,7 @@ router.get("/me/meal-plans", requireAuth, asyncHandler(async (req, res) => {
   }
   const items = await getDb().collection("mealPlans").find(query).sort({ plannedFor: 1, mealType: 1 }).toArray();
 
-  // Dynamically populate missing images for backward compatibility
+  // Wsteczne uzupełnianie obrazków (Backward Compatibility) przy użyciu operatora $in
   const recipeIds = [...new Set(items.filter(item => !item.recipeSnapshot?.image).map(item => item.recipeId))];
   if (recipeIds.length > 0) {
     const recipes = await getDb().collection("recipes").find({ _id: { $in: recipeIds } }).toArray();
@@ -632,6 +703,7 @@ router.get("/me/meal-plans", requireAuth, asyncHandler(async (req, res) => {
   res.json({ items });
 }));
 
+/** Zaplanowanie posiłku */
 router.post("/me/meal-plans", requireAuth, asyncHandler(async (req, res) => {
   const schema = z.object({
     recipeId: z.string(),
@@ -662,6 +734,7 @@ router.post("/me/meal-plans", requireAuth, asyncHandler(async (req, res) => {
   res.status(201).json({ item });
 }));
 
+/** Aktualizacja zaplanowanego posiłku */
 router.patch("/me/meal-plans/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -675,6 +748,7 @@ router.patch("/me/meal-plans/:id", requireAuth, asyncHandler(async (req, res) =>
   res.json({ ok: true });
 }));
 
+/** Usunięcie posiłku z planu */
 router.delete("/me/meal-plans/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -682,29 +756,21 @@ router.delete("/me/meal-plans/:id", requireAuth, asyncHandler(async (req, res) =
   res.json({ ok: true });
 }));
 
+// --- PANEL ADMINISTRATORA ---
+
+/**
+ * Zestawienie statystyk i najnowszych danych dla dashboardu admina.
+ * Demonstracja potęgi Promise.all przy równoległych zapytaniach MongoDB.
+ */
 router.get("/admin/summary", requireAdmin, asyncHandler(async (_req, res) => {
   const db = getDb();
   const [
-    users,
-    admins,
-    blockedUsers,
-    recipes,
-    publishedRecipes,
-    hiddenRecipes,
-    comments,
-    hiddenComments,
-    ratings,
-    favorites,
-    shoppingLists,
-    mealPlans,
-    reports,
-    newestUsers,
-    newestComments,
-    topRecipes,
+    users, admins, blockedUsers,
+    recipes, publishedRecipes, hiddenRecipes,
+    comments, hiddenComments,
+    ratings, favorites, shoppingLists, mealPlans, reports,
+    newestUsers, newestComments, topRecipes,
   ] = await Promise.all([
-    // === MONGODB PERFORMANCE AND AGGREGATION VIA MULTIPLE QUERIES ===
-    // Wypychamy do silnika bazy danych serię asynchronicznych zapytań zliczających (countDocuments)
-    // oraz pobierających listy (find), wykonując je w pełni równolegle po stronie wątków bazy danych.
     db.collection("users").countDocuments({}),
     db.collection("users").countDocuments({ role: "admin" }),
     db.collection("users").countDocuments({ status: "blocked" }),
@@ -712,47 +778,36 @@ router.get("/admin/summary", requireAdmin, asyncHandler(async (_req, res) => {
     db.collection("recipes").countDocuments({ status: "published" }),
     db.collection("recipes").countDocuments({ status: "hidden" }),
     db.collection("comments").countDocuments({}),
-    // Operator $ne: Not Equal – zlicza komentarze o statusie innym niż "visible" (ukryte i usunięte)
     db.collection("comments").countDocuments({ status: { $ne: "visible" } }),
     db.collection("ratings").countDocuments({}),
     db.collection("favorites").countDocuments({}),
     db.collection("shoppingLists").countDocuments({}),
     db.collection("mealPlans").countDocuments({}),
     db.collection("reports").countDocuments({ status: "new" }),
-    // Projection (projekcja): projection: { passwordHash: 0 } to wykluczenie pola hasła ze zwracanego dokumentu
-    // ze względów bezpieczeństwa (wyświetlamy profil użytkownika bez narażania jego skrótu hasła)
+    // Zastosowanie projekcji i sortowania
     db.collection("users").find({}, { projection: { passwordHash: 0 } }).sort({ createdAt: -1 }).limit(5).toArray(),
     db.collection("comments").find({}).sort({ createdAt: -1 }).limit(5).toArray(),
-    // Projection & Multi-Field Sorting: Wybiera określone pola do podsumowania i sortuje malejąco po liczniku ulubień i ocenach
     db.collection("recipes").find({}, { projection: { title: 1, slug: 1, ratingAvg: 1, favoriteCount: 1, status: 1 } }).sort({ favoriteCount: -1, ratingAvg: -1 }).limit(5).toArray(),
   ]);
 
   res.json({
     stats: {
-      users,
-      admins,
-      blockedUsers,
-      recipes,
-      publishedRecipes,
-      hiddenRecipes,
-      comments,
-      hiddenComments,
-      ratings,
-      favorites,
-      shoppingLists,
-      mealPlans,
+      users, admins, blockedUsers,
+      recipes, publishedRecipes, hiddenRecipes,
+      comments, hiddenComments,
+      ratings, favorites, shoppingLists, mealPlans,
       openReports: reports,
     },
-    newestUsers,
-    newestComments,
-    topRecipes,
+    newestUsers, newestComments, topRecipes,
   });
 }));
 
+/** Zarządzanie użytkownikami (Admin) */
 router.get("/admin/users", requireAdmin, asyncHandler(async (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 30)));
   const query = {};
+  // Przeszukiwanie wielu pól przy użyciu operatora $or i wyrażeń regularnych ($regex)
   if (req.query.q) {
     const phrase = String(req.query.q).trim();
     query.$or = [
@@ -771,9 +826,11 @@ router.get("/admin/users", requireAdmin, asyncHandler(async (req, res) => {
   res.json({ items, page, limit, total, pages: Math.ceil(total / limit) });
 }));
 
+/** Zmiana roli lub statusu użytkownika (Admin) */
 router.patch("/admin/users/:id", requireAdmin, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
+  // Blokada przed zablokowaniem samego siebie
   if (id.equals(req.user._id) && req.body.status === "blocked") {
     return errorResponse(res, 400, "INVALID_OPERATION", "Nie mozna zablokowac wlasnego konta");
   }
@@ -786,6 +843,7 @@ router.patch("/admin/users/:id", requireAdmin, asyncHandler(async (req, res) => 
   res.json({ ok: true });
 }));
 
+/** Moderacja komentarzy (Admin) */
 router.get("/admin/comments", requireAdmin, asyncHandler(async (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
@@ -799,6 +857,7 @@ router.get("/admin/comments", requireAdmin, asyncHandler(async (req, res) => {
   res.json({ items, page, limit, total, pages: Math.ceil(total / limit) });
 }));
 
+/** Zarządzanie statusami przepisów (Admin) */
 router.get("/admin/recipes", requireAdmin, asyncHandler(async (req, res) => {
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(req.query.limit || 40)));
@@ -812,11 +871,13 @@ router.get("/admin/recipes", requireAdmin, asyncHandler(async (req, res) => {
   res.json({ items, page, limit, total, pages: Math.ceil(total / limit) });
 }));
 
+/** Przeglądanie zgłoszeń (Admin) */
 router.get("/admin/reports", requireAdmin, asyncHandler(async (_req, res) => {
   const items = await getDb().collection("reports").find({}).sort({ createdAt: -1 }).limit(100).toArray();
   res.json({ items });
 }));
 
+/** Zgłoszenie przepisu przez użytkownika */
 router.post("/recipes/:recipeId/reports", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -826,6 +887,7 @@ router.post("/recipes/:recipeId/reports", requireAuth, asyncHandler(async (req, 
   res.status(201).json({ item });
 }));
 
+/** Zmiana statusu przepisu przez Admina (widoczność) */
 router.patch("/admin/recipes/:id/status", requireAdmin, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
@@ -834,6 +896,9 @@ router.patch("/admin/recipes/:id/status", requireAdmin, asyncHandler(async (req,
   res.json({ ok: true });
 }));
 
+// --- POMOCNICZE ---
+
+/** Zwraca domyślny obrazek dla kategorii */
 function imageForCategory(slug) {
   const images = {
     sniadania: "https://images.unsplash.com/photo-1525351484163-7529414344d8?auto=format&fit=crop&w=1200&q=80",
@@ -844,6 +909,7 @@ function imageForCategory(slug) {
   return images[slug] || "https://images.unsplash.com/photo-1495521821757-a1efb6729352?auto=format&fit=crop&w=1200&q=80";
 }
 
+/** Synchronizuje tagi w bazie (dodaje nowe, zwiększa licznik użycia) przy użyciu Upsert i $inc */
 async function syncTags(db, tags) {
   await Promise.all(tags.map((slug) => db.collection("tags").updateOne(
     { slug },
@@ -852,6 +918,9 @@ async function syncTags(db, tags) {
   )));
 }
 
+// --- OBSŁUGA BŁĘDÓW ---
+
+/** Globalna obsługa błędów API */
 router.use((err, _req, res, next) => {
   if (res.headersSent) return next(err);
   if (err.message === "VALIDATION_ERROR") {

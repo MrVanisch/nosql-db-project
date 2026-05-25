@@ -1,3 +1,13 @@
+/**
+ * CookFlow Frontend Application Logic.
+ * Zarządza stanem aplikacji, routingiem (hash-based), interakcjami z API
+ * oraz dynamiczną manipulacją drzewem DOM.
+ */
+
+/**
+ * Główny obiekt stanu aplikacji (State Management).
+ * Przechowuje dane o zalogowanym użytkowniku, przepisach, kategoriach i innych elementach UI.
+ */
 const state = {
   token: localStorage.getItem("token"),
   user: JSON.parse(localStorage.getItem("user") || "null"),
@@ -6,28 +16,38 @@ const state = {
   selectedRecipe: null,
   shoppingLists: [],
   favorites: [],
-  authMode: "login",
+  authMode: "login", // 'login' lub 'register'
   page: 1,
   pages: 1,
-  lastParams: new URLSearchParams(),
-  adminTab: "users",
+  lastParams: new URLSearchParams(), // Zapamiętuje ostatnie parametry wyszukiwania
+  adminTab: "users", // Aktywna zakładka w panelu admina
   adminData: null,
   selectedPlanDate: null,
   totalRecipes: 0,
-  formIngredients: [],
-  formSteps: [],
+  formIngredients: [], // Składniki dodawane w formularzu nowego przepisu
+  formSteps: [], // Kroki dodawane w formularzu nowego przepisu
 };
 
+/** Skrócona funkcja do pobierania elementów DOM */
 const $ = (selector) => document.querySelector(selector);
 
+/**
+ * Uniwersalny wrapper dla żądań Fetch API do backendu.
+ * Automatycznie dołącza nagłówki Content-Type oraz Authorization (jeśli token istnieje).
+ * @param {string} path - Ścieżka API (np. '/recipes').
+ * @param {RequestInit} options - Opcje żądania fetch.
+ * @returns {Promise<any>} Sparsowane dane JSON.
+ */
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  
   const response = await fetch(`/api${path}`, { ...options, headers });
   const contentType = response.headers.get("content-type") || "";
   const data = contentType.includes("application/json")
     ? await response.json().catch(() => ({}))
     : null;
+    
   if (!response.ok) {
     throw new Error(data?.error?.message || "Wystąpił błąd");
   }
@@ -37,6 +57,7 @@ async function api(path, options = {}) {
   return data;
 }
 
+/** Wyświetla powiadomienie typu Toast na górze ekranu */
 function toast(message) {
   const node = $("#toast");
   node.textContent = message;
@@ -44,17 +65,24 @@ function toast(message) {
   setTimeout(() => node.classList.add("hidden"), 3200);
 }
 
+/** Formatuje poziom trudności na język polski */
 function formatDifficulty(value) {
   return { easy: "łatwy", medium: "średni", hard: "trudny" }[value] || value;
 }
 
+/** Formatuje typ posiłku na język polski */
 function formatMeal(value) {
   return { breakfast: "Śniadanie", lunch: "Lunch", dinner: "Obiad", supper: "Kolacja", snack: "Przekąska" }[value] || value;
 }
 
+/**
+ * Aktualizuje elementy interfejsu zależne od stanu zalogowania.
+ * Zarządza widocznością przycisków profilu, wylogowania i panelu admina.
+ */
 function updateAccount() {
   const isLogged = Boolean(state.user);
   const isAdmin = state.user?.role === "admin";
+  
   $("#authButton").classList.toggle("hidden", isLogged);
   $("#logoutButton").classList.toggle("hidden", !isLogged);
   $("#userInfo").classList.toggle("hidden", !isLogged);
@@ -88,21 +116,26 @@ function updateAccount() {
   }
 }
 
+/** Wczytuje dane do panelu administracyjnego (tylko dla adminów) */
 async function loadAdminPanel() {
   if (state.user?.role !== "admin") return;
   const statsNode = $("#adminStats");
   const panelNode = $("#adminPanel");
   try {
     if (panelNode) panelNode.innerHTML = `<div class="admin-empty">Ladowanie panelu administratora...</div>`;
+    
+    // Równoległe pobieranie danych admina
     const [summary, users, comments, recipes] = await Promise.all([
       api("/admin/summary"),
       api("/admin/users?limit=30"),
       api("/admin/comments?limit=30"),
       api("/admin/recipes?limit=30"),
     ]);
+    
     if (!summary?.stats) {
       throw new Error("Endpoint /api/admin/summary nie zwrocil statystyk. Zrestartuj serwer aplikacji.");
     }
+    
     state.adminData = { summary, users, comments, recipes };
     renderAdminStats(summary.stats);
     renderAdminPanel();
@@ -121,20 +154,12 @@ async function loadAdminPanel() {
   }
 }
 
+/** Renderuje kafelki statystyk w panelu admina */
 function renderAdminStats(stats) {
   const safeStats = {
-    users: 0,
-    admins: 0,
-    recipes: 0,
-    publishedRecipes: 0,
-    comments: 0,
-    hiddenComments: 0,
-    favorites: 0,
-    ratings: 0,
-    shoppingLists: 0,
-    mealPlans: 0,
-    openReports: 0,
-    ...stats,
+    users: 0, admins: 0, recipes: 0, publishedRecipes: 0, comments: 0,
+    hiddenComments: 0, favorites: 0, ratings: 0, shoppingLists: 0,
+    mealPlans: 0, openReports: 0, ...stats,
   };
   $("#adminStats").innerHTML = [
     ["Uzytkownicy", safeStats.users, `${safeStats.admins} adminow`],
@@ -152,21 +177,21 @@ function renderAdminStats(stats) {
   `).join("");
 }
 
+/** Renderuje zawartość aktywnej zakładki panelu admina */
 function renderAdminPanel() {
   if (!state.adminData) return;
+  
+  // Przełączanie klasy 'active' na przyciskach zakładek
   document.querySelectorAll(".admin-tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.adminTab === state.adminTab);
   });
+  
   const panel = $("#adminPanel");
   const usersData = { items: [], total: 0, ...state.adminData.users };
   const commentsData = { items: [], total: 0, ...state.adminData.comments };
   const recipesData = { items: [], total: 0, ...state.adminData.recipes };
-  const summaryData = {
-    topRecipes: [],
-    newestUsers: [],
-    newestComments: [],
-    ...state.adminData.summary,
-  };
+  const summaryData = { topRecipes: [], newestUsers: [], newestComments: [], ...state.adminData.summary };
+  
   if (state.adminTab === "users") {
     panel.innerHTML = `
       <div class="admin-table-head"><h3>Uzytkownicy</h3><span>${usersData.total} kont</span></div>
@@ -189,6 +214,7 @@ function renderAdminPanel() {
     `;
     return;
   }
+  
   if (state.adminTab === "comments") {
     panel.innerHTML = `
       <div class="admin-table-head"><h3>Moderacja komentarzy</h3><span>${commentsData.total} komentarzy</span></div>
@@ -211,6 +237,7 @@ function renderAdminPanel() {
     `;
     return;
   }
+  
   if (state.adminTab === "recipes") {
     panel.innerHTML = `
       <div class="admin-table-head"><h3>Zarzadzanie przepisami</h3><span>${recipesData.total} rekordow</span></div>
@@ -233,6 +260,8 @@ function renderAdminPanel() {
     `;
     return;
   }
+  
+  // Domyślna zakładka: Przegląd (Overview)
   panel.innerHTML = `
     <div class="admin-overview">
       <div>
@@ -251,6 +280,7 @@ function renderAdminPanel() {
   `;
 }
 
+/** Pobiera kategorie z API i aktualizuje listy wyboru (select) w formularzach */
 async function loadCategories() {
   const data = await api("/categories");
   state.categories = data.items;
@@ -261,20 +291,26 @@ async function loadCategories() {
   $("#newCategory").innerHTML = state.categories.map((item) => `<option value="${item.slug}">${item.name}</option>`).join("");
 }
 
+/**
+ * Wczytuje listę przepisów z uwzględnieniem filtrów, wyszukiwania i paginacji.
+ * @param {URLSearchParams} params - Parametry zapytania (query string).
+ */
 async function loadRecipes(params = new URLSearchParams()) {
   state.lastParams = new URLSearchParams(params);
   state.page = Number(params.get("page") || 1);
   params.set("page", String(state.page));
   params.set("limit", "48");
+  
   const data = await api(`/recipes?${params.toString()}`);
   state.recipes = data.items;
   state.pages = data.pages || 1;
   $("#resultCount").textContent = `${data.total} przepisów`;
+  
   renderRecipes();
   renderPagination();
   renderRecipeSelect();
 
-  // If no search filters are active, this is the absolute total of published recipes
+  // Obliczanie całkowitej liczby przepisów dla statystyk Hero (tylko gdy nie ma filtrów)
   const isFiltered = params.get("q") || params.get("category") || params.get("difficulty") || params.get("maxTime") || params.get("minRating") || params.get("tags") || params.get("diet") || params.get("ingredients");
   if (!isFiltered) {
     state.totalRecipes = data.total;
@@ -282,6 +318,7 @@ async function loadRecipes(params = new URLSearchParams()) {
   updateHeroStats();
 }
 
+/** Renderuje siatkę kart przepisów w katalogu */
 function renderRecipes() {
   const grid = $("#recipeGrid");
   if (!state.recipes.length) {
@@ -311,6 +348,7 @@ function renderRecipes() {
   `).join("");
 }
 
+/** Renderuje kontrolki paginacji */
 function renderPagination() {
   const node = $("#pagination");
   if (!node || state.pages <= 1) {
@@ -335,6 +373,10 @@ function renderPagination() {
   `;
 }
 
+/**
+ * Pobiera szczegóły przepisu po slugu i renderuje widok pełnoekranowy.
+ * @param {string} slug - Unikalny identyfikator przyjazny dla URL.
+ */
 async function openRecipe(slug) {
   if (!slug) return;
   const data = await api(`/recipes/${slug}`);
@@ -416,8 +458,10 @@ async function openRecipe(slug) {
   `;
 }
 
+// Lokalny cache dla wszystkich przepisów (używany do autouzupełniania wyszukiwania)
 let allRecipesCache = null;
 
+/** Pobiera wszystkie przepisy (maksymalnie 250) do lokalnego przeszukiwania/podpowiedzi */
 async function getAllRecipes() {
   if (allRecipesCache) return allRecipesCache;
   try {
@@ -430,11 +474,12 @@ async function getAllRecipes() {
   }
 }
 
+/** Czyści cache przepisów przy zmianach strukturalnych */
 function renderRecipeSelect() {
-  // Clear the search cache when recipe list changes
   allRecipesCache = null;
 }
 
+/** Aktualizuje liczbowe statystyki w sekcji Hero */
 function updateHeroStats() {
   const recipesCountEl = $("#statRecipesCount");
   if (recipesCountEl && state.totalRecipes) {
@@ -458,11 +503,18 @@ function updateHeroStats() {
   }
 }
 
-// Global functions for inline onclick handlers
+// --- FUNKCJE GLOBALNE DLA HANDLERÓW ONCLICK W HTML ---
+
+/** Zmienia fragment URL, co wywołuje router i otwiera przepis */
 window.openRecipeBySlug = (slug) => {
   location.hash = `#recipe/${slug}`;
 };
 
+/**
+ * Otwiera modal z interaktywną listą zakupów.
+ * Zarządza edycją nazw, ilości, usuwaniem i odznaczaniem produktów.
+ * @param {string} id - ID listy zakupów.
+ */
 window.viewShoppingList = (id) => {
   const list = state.shoppingLists.find(l => (l._id || l.id) === id);
   if (!list) return;
@@ -472,6 +524,7 @@ window.viewShoppingList = (id) => {
   };
   updateTitle();
   
+  // Zmiana nazwy listy zakupów
   $("#renameShoppingListBtn").onclick = async () => {
     const newListName = prompt("Zmień nazwę listy zakupów:", list.name);
     if (newListName && newListName.trim()) {
@@ -496,6 +549,7 @@ window.viewShoppingList = (id) => {
   };
   updateMeta();
 
+  /** Aktualizuje statystyki w tle po zmianach w liście zakupów */
   const updateBackgroundStats = () => {
     const shoppingItemCount = state.shoppingLists.reduce((sum, list) => sum + list.items.length, 0);
     const shoppingCheckedCount = state.shoppingLists.reduce((sum, list) => sum + list.items.filter(i => i.checked).length, 0);
@@ -520,6 +574,7 @@ window.viewShoppingList = (id) => {
     updateHeroStats();
   };
 
+  /** Renderuje listę produktów wewnątrz dialogu */
   const renderItems = () => {
     $("#shoppingListItems").innerHTML = list.items.length
       ? list.items.map((item, index) => `
@@ -537,6 +592,7 @@ window.viewShoppingList = (id) => {
       : `<div class="empty-state" style="text-align: center; padding: 16px;">Brak produktów na liście. Dodaj coś powyżej!</div>`;
   };
 
+  /** Usuwa produkt z listy zakupów */
   window.deleteShoppingItemRow = async (listId, itemIndex) => {
     const targetList = state.shoppingLists.find(l => (l._id || l.id) === listId);
     if (!targetList) return;
@@ -560,6 +616,7 @@ window.viewShoppingList = (id) => {
     }
   };
 
+  /** Edytuje parametry produktu (nazwa, ilość, jednostka) */
   window.editShoppingItem = async (listId, itemIndex) => {
     const targetList = state.shoppingLists.find(l => (l._id || l.id) === listId);
     if (!targetList) return;
@@ -597,6 +654,7 @@ window.viewShoppingList = (id) => {
     }
   };
 
+  /** Przełącza stan 'kupiony' (checkbox) dla produktu */
   window.toggleShoppingItem = async (listId, itemIndex) => {
     const targetList = state.shoppingLists.find(l => (l._id || l.id) === listId);
     if (!targetList) return;
@@ -617,6 +675,7 @@ window.viewShoppingList = (id) => {
     }
   };
 
+  // Dodawanie nowego produktu do istniejącej listy
   $("#addShoppingItemForm").onsubmit = async (e) => {
     e.preventDefault();
     const name = $("#newShoppingItemName").value.trim();
@@ -655,6 +714,7 @@ window.viewShoppingList = (id) => {
   $("#shoppingListDialog").showModal();
 };
 
+/** Usuwa całą listę zakupów */
 window.deleteShoppingList = async (id) => {
   if (!confirm("Czy na pewno chcesz usunąć tę listę zakupów?")) return;
   try {
@@ -667,6 +727,7 @@ window.deleteShoppingList = async (id) => {
   }
 };
 
+/** Usuwa przepis z ulubionych */
 window.removeFavorite = async (recipeId) => {
   try {
     await api(`/me/favorites/${recipeId}`, { method: "DELETE" });
@@ -677,6 +738,7 @@ window.removeFavorite = async (recipeId) => {
   }
 };
 
+/** Usuwa pozycję z planera posiłków */
 window.deleteMealPlan = async (planId) => {
   try {
     await api(`/me/meal-plans/${planId}`, { method: "DELETE" });
@@ -687,8 +749,13 @@ window.deleteMealPlan = async (planId) => {
   }
 };
 
+/**
+ * Wczytuje dane użytkownika (ulubione, listy zakupów, plany posiłków)
+ * i renderuje je w odpowiednich zakładkach profilu.
+ */
 async function loadPrivatePanels() {
   if (!state.user) {
+    // Widok dla niezalogowanego
     $("#favoriteList").innerHTML = `<div class="empty-state">Zaloguj się, aby zobaczyć ulubione przepisy.</div>`;
     $("#shoppingList").innerHTML = `<div class="empty-state">Zaloguj się, aby zobaczyć swoje listy zakupów.</div>`;
     $("#mealList").innerHTML = `<div class="empty-state">Zaloguj się, aby zaplanować posiłki.</div>`;
@@ -698,6 +765,7 @@ async function loadPrivatePanels() {
     updateHeroStats();
     return;
   }
+  
   const [favorites, lists, plans] = await Promise.all([
     api("/me/favorites"),
     api("/me/shopping-lists"),
@@ -712,6 +780,7 @@ async function loadPrivatePanels() {
   $("#shoppingCheckedCount").textContent = String(shoppingCheckedCount);
   updateHeroStats();
 
+  // Renderowanie ulubionych
   $("#favoriteList").innerHTML = favorites.items.length
     ? favorites.items.map((item) => `
         <article class="saved-recipe-card">
@@ -728,6 +797,7 @@ async function loadPrivatePanels() {
          <span>Kliknij gwiazdkę przy przepisie, aby dodać go tutaj.</span>
        </div>`;
 
+  // Renderowanie kart list zakupów
   $("#shoppingList").innerHTML = lists.items.length
     ? lists.items.map((list) => {
         const checked = list.items.filter(i => i.checked).length;
@@ -749,7 +819,7 @@ async function loadPrivatePanels() {
          <span>Wygeneruj listę z poziomu szczegółów dowolnego przepisu.</span>
        </div>`;
 
-  // Group plans by date for the calendar strip
+  // Grupowanie planów posiłków po dacie dla kalendarza
   const groupedPlans = {};
   plans.items.forEach(plan => {
     const dateStr = plan.plannedFor;
@@ -757,7 +827,7 @@ async function loadPrivatePanels() {
     groupedPlans[dateStr].push(plan);
   });
 
-  // Render Calendar Strip
+  // Renderowanie paska kalendarza (najbliższe 7 dni)
   const today = new Date();
   const calendarStrip = $("#calendarStrip");
   if (calendarStrip) {
@@ -767,7 +837,7 @@ async function loadPrivatePanels() {
       d.setDate(today.getDate() + i);
       const dateStr = d.toISOString().slice(0, 10);
 
-      const dayName = d.toLocaleDateString("pl-PL", { weekday: "short" }); // e.g. "pn."
+      const dayName = d.toLocaleDateString("pl-PL", { weekday: "short" });
       const dayNum = d.getDate();
       const hasMeals = groupedPlans[dateStr] && groupedPlans[dateStr].length > 0;
       const isSelected = state.selectedPlanDate === dateStr ? "active" : "";
@@ -783,7 +853,7 @@ async function loadPrivatePanels() {
     calendarStrip.innerHTML = stripHtml.join("");
   }
 
-  // Filter plans based on state.selectedPlanDate
+  // Filtrowanie wyświetlanych posiłków na podstawie wybranej daty w kalendarzu
   let displayedPlans = plans.items;
   if (state.selectedPlanDate) {
     displayedPlans = plans.items.filter(p => p.plannedFor === state.selectedPlanDate);
@@ -792,10 +862,9 @@ async function loadPrivatePanels() {
     $("#clearCalendarFilter")?.classList.add("hidden");
   }
 
-  // Sort displayed plans chronologically
+  // Sortowanie chronologiczne
   displayedPlans.sort((a, b) => a.plannedFor.localeCompare(b.plannedFor));
 
-  // Group displayed plans by date for rendering
   const displayGrouped = {};
   displayedPlans.forEach(plan => {
     const dateStr = plan.plannedFor;
@@ -805,25 +874,19 @@ async function loadPrivatePanels() {
 
   const sortedDisplayDates = Object.keys(displayGrouped).sort();
 
+  // Renderowanie listy posiłków w planerze
   if (sortedDisplayDates.length) {
     const mealTypeNames = {
-      breakfast: "Śniadanie",
-      lunch: "Lunch",
-      dinner: "Obiad",
-      supper: "Kolacja",
-      snack: "Przekąska",
+      breakfast: "Śniadanie", lunch: "Lunch", dinner: "Obiad", supper: "Kolacja", snack: "Przekąska",
     };
 
     $("#mealList").innerHTML = sortedDisplayDates.map(dateStr => {
       const dateObj = new Date(dateStr);
       const formattedDate = dateObj.toLocaleDateString("pl-PL", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
+        weekday: "long", day: "numeric", month: "long",
       });
 
       const dayMeals = displayGrouped[dateStr];
-      // Sort meals of the day by mealType order
       const mealOrder = ["breakfast", "lunch", "dinner", "supper", "snack"];
       dayMeals.sort((a, b) => mealOrder.indexOf(a.mealType) - mealOrder.indexOf(b.mealType));
 
@@ -863,6 +926,7 @@ async function loadPrivatePanels() {
   }
 }
 
+/** Renderuje listę składników w formularzu dodawania przepisu */
 function renderFormIngredients() {
   const container = $("#ingredientsList");
   if (!container) return;
@@ -878,6 +942,7 @@ function renderFormIngredients() {
   `).join("");
 }
 
+/** Renderuje listę kroków przygotowania w formularzu dodawania przepisu */
 function renderFormSteps() {
   const container = $("#stepsList");
   if (!container) return;
@@ -904,13 +969,11 @@ window.removeFormIngredient = function(index) {
 
 window.removeFormStep = function(index) {
   state.formSteps.splice(index, 1);
-  // Recalculate step order to keep it logical
-  state.formSteps.forEach((step, i) => {
-    step.order = i + 1;
-  });
+  state.formSteps.forEach((step, i) => { step.order = i + 1; });
   renderFormSteps();
 };
 
+/** Dodaje składnik wpisany w pola formularza do lokalnej listy w stanie */
 function addIngredientFromForm() {
   const nameInput = $("#ingNameInput");
   const qtyInput = $("#ingQtyInput");
@@ -922,36 +985,20 @@ function addIngredientFromForm() {
   const quantity = Number(qtyInput.value);
   const unit = unitInput.value.trim();
   
-  if (!name) {
-    toast("Wpisz nazwę składnika!");
-    nameInput.focus();
-    return;
-  }
-  if (name.length < 2) {
-    toast("Nazwa składnika musi mieć co najmniej 2 znaki!");
-    nameInput.focus();
-    return;
-  }
-  if (isNaN(quantity) || quantity <= 0) {
-    toast("Ilość musi być liczbą dodatnią!");
-    qtyInput.focus();
-    return;
-  }
-  if (!unit) {
-    toast("Jednostka nie może być pusta!");
-    unitInput.focus();
-    return;
-  }
+  if (!name) { toast("Wpisz nazwę składnika!"); nameInput.focus(); return; }
+  if (name.length < 2) { toast("Nazwa składnika musi mieć co najmniej 2 znaki!"); nameInput.focus(); return; }
+  if (isNaN(quantity) || quantity <= 0) { toast("Ilość musi być liczbą dodatnią!"); qtyInput.focus(); return; }
+  if (!unit) { toast("Jednostka nie może być pusta!"); unitInput.focus(); return; }
   
   state.formIngredients.push({ name, quantity, unit, note: "" });
   renderFormIngredients();
   
-  // Clear only ingredient name, keep unit/qty for rapid entry or set defaults
   nameInput.value = "";
   qtyInput.value = "1";
   nameInput.focus();
 }
 
+/** Dodaje krok przygotowania wpisany w pola formularza do lokalnej listy w stanie */
 function addStepFromForm() {
   const instrInput = $("#stepInstructionInput");
   const durInput = $("#stepDurationInput");
@@ -961,61 +1008,32 @@ function addStepFromForm() {
   const instruction = instrInput.value.trim();
   const durationMinutes = Number(durInput.value || 0);
   
-  if (!instruction) {
-    toast("Wpisz opis kroku!");
-    instrInput.focus();
-    return;
-  }
-  if (instruction.length < 6) {
-    toast("Opis kroku musi mieć co najmniej 6 znaków!");
-    instrInput.focus();
-    return;
-  }
-  if (isNaN(durationMinutes) || durationMinutes < 0) {
-    toast("Czas trwania musi być liczbą nieujemną!");
-    durInput.focus();
-    return;
-  }
+  if (!instruction) { toast("Wpisz opis kroku!"); instrInput.focus(); return; }
+  if (instruction.length < 6) { toast("Opis kroku musi mieć co najmniej 6 znaków!"); instrInput.focus(); return; }
+  if (isNaN(durationMinutes) || durationMinutes < 0) { toast("Czas trwania musi być liczbą nieujemną!"); durInput.focus(); return; }
   
   const order = state.formSteps.length + 1;
   state.formSteps.push({ order, instruction, durationMinutes });
   renderFormSteps();
   
-  // Reset step inputs
   instrInput.value = "";
   durInput.value = "5";
   instrInput.focus();
 }
 
-function parseIngredients(value) {
-  return value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
-    const [name, quantity, unit] = line.split("|").map((part) => part.trim());
-    return { name, quantity: Number(quantity || 1), unit: unit || "szt" };
-  });
-}
-
-function parseSteps(value) {
-  return value.split("\n").map((line) => line.trim()).filter(Boolean).map((instruction, index) => ({
-    order: index + 1,
-    instruction,
-    durationMinutes: 5,
-  }));
-}
-
+/** Pomocnicza funkcja do parsowania tekstu na listę (np. tagi po przecinku) */
 function listFromInput(value) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
+/** Zabezpiecza tekst przed atakami XSS poprzez zamianę znaków specjalnych HTML */
 function escapeHtml(value) {
   return String(value || "").replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
   }[char]));
 }
 
+/** Otwiera modal logowania/rejestracji w wybranym trybie */
 function openAuth(mode = "login") {
   state.authMode = mode;
   $("#loginTab").classList.toggle("active", mode === "login");
@@ -1026,6 +1044,7 @@ function openAuth(mode = "login") {
   $("#authDialog").showModal();
 }
 
+/** Wysyła formularz autentykacji do API i zapisuje token w LocalStorage */
 async function submitAuth() {
   const body = {
     email: $("#authEmail").value,
@@ -1052,6 +1071,7 @@ async function submitAuth() {
   }
 }
 
+/** Sprawdza czy użytkownik jest zalogowany, jeśli nie - otwiera modal logowania */
 function requireLogin() {
   if (!state.user) {
     openAuth("login");
@@ -1060,15 +1080,28 @@ function requireLogin() {
   return true;
 }
 
+/**
+ * GLOBALNY EVENT LISTENER DLA KLIKNIĘĆ (Event Delegation).
+ * Obsługuje dynamicznie dodawane elementy DOM poprzez sprawdzanie atrybutów 'data-*'.
+ */
 document.addEventListener("click", async (event) => {
+  // Przycisk otwierający przepis
   const open = event.target.closest("[data-open]");
+  // Przycisk dodawania do ulubionych
   const favorite = event.target.closest("[data-favorite]");
+  // Przycisk generowania listy zakupów
   const shopping = event.target.closest("[data-shopping]");
+  // Przycisk oceny gwiazdkowej
   const rate = event.target.closest("[data-rate]");
+  // Przycisk zmiany strony (paginacja)
   const page = event.target.closest("[data-page]");
+  // Przycisk zamykania dialogu
   const closeDialog = event.target.closest("[data-close-dialog]");
+  // Przycisk powrotu na stronę główną
   const goHome = event.target.closest("[data-go-home]");
+  // Kliknięcie w krok przygotowania (oznaczenie jako gotowy)
   const toggleStep = event.target.closest("[data-toggle-step]");
+  // Otwieranie zapisanego przepisu (z planera lub ulubionych)
   const openSaved = event.target.closest("[data-open-saved]");
   const removeFavoriteBtn = event.target.closest("[data-remove-favorite]");
   const viewShoppingBtn = event.target.closest("[data-view-shopping-list]");
@@ -1094,11 +1127,7 @@ document.addEventListener("click", async (event) => {
 
   if (calendarDayBtn) {
     const selectedDate = calendarDayBtn.dataset.calendarDay;
-    if (state.selectedPlanDate === selectedDate) {
-      state.selectedPlanDate = null; // Toggle off
-    } else {
-      state.selectedPlanDate = selectedDate;
-    }
+    state.selectedPlanDate = state.selectedPlanDate === selectedDate ? null : selectedDate;
     await loadPrivatePanels();
     return;
   }
@@ -1114,15 +1143,9 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
-  if (goHome) {
-    location.hash = "#home";
-    return;
-  }
+  if (goHome) { location.hash = "#home"; return; }
 
-  if (toggleStep) {
-    toggleStep.classList.toggle("completed");
-    return;
-  }
+  if (toggleStep) { toggleStep.classList.toggle("completed"); return; }
 
   if (openSaved) {
     const slug = openSaved.dataset.openSaved;
@@ -1208,6 +1231,7 @@ document.addEventListener("click", async (event) => {
     }
   }
 
+  // Akcje panelu administratora
   const adminTab = event.target.closest("[data-admin-tab]");
   if (adminTab) {
     state.adminTab = adminTab.dataset.adminTab;
@@ -1256,6 +1280,7 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+/** Obsługa formularza wyszukiwania przepisów */
 $("#searchForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -1266,6 +1291,7 @@ $("#searchForm").addEventListener("submit", (event) => {
   loadRecipes(params).catch((err) => toast(err.message));
 });
 
+/** Obsługa formularza dodawania nowego przepisu */
 $("#recipeForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!requireLogin()) return;
@@ -1280,6 +1306,7 @@ $("#recipeForm").addEventListener("submit", async (event) => {
     $("#stepInstructionInput").focus();
     return;
   }
+  
   const submitBtn = $("#recipeForm button[type='submit']");
   if (submitBtn) {
     submitBtn.disabled = true;
@@ -1298,12 +1325,9 @@ $("#recipeForm").addEventListener("submit", async (event) => {
           isMain: true
         });
       } catch (err) {
-        toast("Adres URL zdjęcia jest niepoprawny. Pozostaw puste lub wpisz prawidłowy adres URL.");
+        toast("Adres URL zdjęcia jest niepoprawny.");
         $("#newImageUrl").focus();
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = "Opublikuj przepis 🍳";
-        }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Opublikuj przepis 🍳"; }
         return;
       }
     }
@@ -1350,6 +1374,7 @@ $("#recipeForm").addEventListener("submit", async (event) => {
   }
 });
 
+/** Obsługa formularza planowania posiłków */
 $("#mealForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!requireLogin()) return;
@@ -1371,10 +1396,9 @@ $("#mealForm").addEventListener("submit", async (event) => {
   }
 });
 
-// User profile form handling
+/** Obsługa aktualizacji profilu użytkownika */
 $("#profileForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  
   const displayName = $("#profileDisplayName").value;
   const bio = $("#profileBio").value;
   const avatarUrl = $("#profileAvatarUrl").value;
@@ -1426,6 +1450,7 @@ $("#refreshAdminBtn").addEventListener("click", () => {
   loadAdminPanel().then(() => toast("Panel administratora odswiezony")).catch((err) => toast(err.message));
 });
 
+/** Obsługa formularza komentowania */
 document.addEventListener("submit", async (event) => {
   if (event.target.id !== "commentForm") return;
   event.preventDefault();
@@ -1447,17 +1472,21 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+/**
+ * GŁÓWNY ROUTER APLIKACJI (Hash-based Routing).
+ * Reaguje na zmiany fragmentu URL (#home, #recipe/slug, itp.).
+ */
 function handleRoute() {
   const hash = location.hash || "#home";
   
-  // Hide all sections first
+  // Ukrywanie wszystkich sekcji UI
   const sections = ["home", "recipeDetails", "planner", "saved", "shopping", "add", "admin"];
   sections.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.add("hidden");
   });
   
-  // Toggle hero section visibility (only on home catalog)
+  // Zarządzanie widocznością sekcji Hero (tylko na głównej liście)
   const hero = $(".hero");
   if (hero) {
     if (hash === "#home" || hash === "" || hash.startsWith("#search")) {
@@ -1467,7 +1496,7 @@ function handleRoute() {
     }
   }
   
-  // Toggle active class on nav links
+  // Aktualizacja aktywnego linku w nawigacji
   document.querySelectorAll(".nav a").forEach(link => {
     const href = link.getAttribute("href");
     if (href === hash || (hash === "#home" && href === "#home")) {
@@ -1477,7 +1506,7 @@ function handleRoute() {
     }
   });
 
-  // Handle specific views
+  // Logika wyświetlania konkretnych sekcji
   if (hash === "#home" || hash === "" || hash.startsWith("#search")) {
     $("#home").classList.remove("hidden");
   } else if (hash === "#planner") {
@@ -1495,14 +1524,7 @@ function handleRoute() {
     const form = $("#recipeForm");
     if (form) {
       form.reset();
-      // Explicitly reset number values to defaults
-      $("#prepTime").value = "10";
-      $("#cookTime").value = "20";
-      $("#servings").value = "2";
-      $("#nutCalories").value = "0";
-      $("#nutProtein").value = "0";
-      $("#nutFat").value = "0";
-      $("#nutCarbs").value = "0";
+      $("#prepTime").value = "10"; $("#cookTime").value = "20"; $("#servings").value = "2";
     }
   } else if (hash === "#admin") {
     if (state.user?.role === "admin") {
@@ -1512,80 +1534,47 @@ function handleRoute() {
     }
   } else if (hash.startsWith("#recipe/")) {
     const slug = hash.replace("#recipe/", "");
-    openRecipe(slug).catch(() => {
-      location.hash = "#home";
-    });
+    openRecipe(slug).catch(() => { location.hash = "#home"; });
   } else if (hash === "#recipeDetails") {
     $("#recipeDetails").classList.remove("hidden");
   }
   
-  // Smooth scroll to top on route change
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 window.addEventListener("hashchange", handleRoute);
 
+/**
+ * INICJALIZACJA APLIKACJI.
+ * Ustawia domyślne wartości, binduje event listenery i wczytuje wstępne dane.
+ */
 async function init() {
   updateAccount();
   const today = new Date().toISOString().slice(0, 10);
-  $("#plannedFor").value = today;
+  if ($("#plannedFor")) $("#plannedFor").value = today;
 
-  // Bind list builder add buttons & keydown rapid entry listeners
-  const addIngBtn = $("#addIngBtn");
-  if (addIngBtn) {
-    addIngBtn.addEventListener("click", addIngredientFromForm);
-  }
-  const addStepBtn = $("#addStepBtn");
-  if (addStepBtn) {
-    addStepBtn.addEventListener("click", addStepFromForm);
-  }
+  // Powiązanie przycisków dodawania w formularzu przepisu
+  if ($("#addIngBtn")) $("#addIngBtn").addEventListener("click", addIngredientFromForm);
+  if ($("#addStepBtn")) $("#addStepBtn").addEventListener("click", addStepFromForm);
 
-  const ingNameInput = $("#ingNameInput");
-  const ingQtyInput = $("#ingQtyInput");
-  const ingUnitInput = $("#ingUnitInput");
-  if (ingNameInput && ingQtyInput && ingUnitInput) {
-    [ingNameInput, ingQtyInput, ingUnitInput].forEach(input => {
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          addIngredientFromForm();
-        }
-      });
+  // Obsługa klawisza Enter dla szybkiego wpisywania składników
+  const ingInputs = [$("#ingNameInput"), $("#ingQtyInput"), $("#ingUnitInput")];
+  ingInputs.forEach(input => {
+    input?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); addIngredientFromForm(); }
     });
-  }
+  });
 
-  const stepInstructionInput = $("#stepInstructionInput");
-  const stepDurationInput = $("#stepDurationInput");
-  if (stepInstructionInput) {
-    stepInstructionInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        addStepFromForm();
-      }
-    });
-  }
-  if (stepDurationInput) {
-    stepDurationInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        addStepFromForm();
-      }
-    });
-  }
+  $("#stepInstructionInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); addStepFromForm(); }
+  });
   
-  // Setup toggle advanced filters accordion trigger
-  const toggleFiltersBtn = $("#toggleFiltersBtn");
-  if (toggleFiltersBtn) {
-    toggleFiltersBtn.addEventListener("click", () => {
-      const panel = $("#advancedFilters");
-      if (panel) {
-        panel.classList.remove("hidden");
-        panel.classList.toggle("show");
-      }
-    });
-  }
+  $("#toggleFiltersBtn")?.addEventListener("click", () => {
+    const panel = $("#advancedFilters");
+    if (panel) { panel.classList.remove("hidden"); panel.classList.toggle("show"); }
+  });
 
-  // Wyszukiwarka przepisów w zakładce przepisy (instant suggestions)
+  // --- LOGIKA AUTO-SUGESTII DLA WYSZUKIWANIA ---
   const mainSearchInput = $("#q");
   const mainSearchDropdown = $("#recipeSearchDropdown");
 
@@ -1598,22 +1587,15 @@ async function init() {
     mainSearchInput.addEventListener("input", async () => {
       const term = mainSearchInput.value.toLowerCase().trim();
       const recipes = await getAllRecipes();
-      if (!term) {
-        renderMainDropdownItems(recipes);
-        return;
-      }
+      if (!term) { renderMainDropdownItems(recipes); return; }
       const filtered = recipes.filter(r =>
-        r.title.toLowerCase().includes(term) ||
-        (r.description && r.description.toLowerCase().includes(term))
+        r.title.toLowerCase().includes(term) || (r.description && r.description.toLowerCase().includes(term))
       );
       renderMainDropdownItems(filtered);
     });
 
-    // Zamykanie listy po kliknięciu poza wyszukiwarką
     document.addEventListener("click", (e) => {
-      if (!e.target.closest(".search-input-wrapper")) {
-        mainSearchDropdown.classList.add("hidden");
-      }
+      if (!e.target.closest(".search-input-wrapper")) mainSearchDropdown.classList.add("hidden");
     });
 
     mainSearchDropdown.addEventListener("click", (e) => {
@@ -1633,22 +1615,19 @@ async function init() {
       mainSearchDropdown.classList.remove("hidden");
       return;
     }
-    mainSearchDropdown.innerHTML = recipes.slice(0, 10).map(recipe => {
-      const img = recipe.image || "";
-      return `
-        <div class="dropdown-item" data-select-slug="${recipe.slug}" data-select-title="${escapeHtml(recipe.title)}">
-          ${img ? `<img src="${img}" alt="${escapeHtml(recipe.title)}">` : `<div style="width:32px; height:32px; background:var(--accent-light); border-radius:4px; display:grid; place-items:center; font-size:12px; color:var(--accent);">🍳</div>`}
-          <div class="dropdown-item-text">
-            <strong>${escapeHtml(recipe.title)}</strong>
-            <span class="muted">${escapeHtml(recipe.categorySlug || "")} • ⏱ ${recipe.totalTimeMinutes} min</span>
-          </div>
+    mainSearchDropdown.innerHTML = recipes.slice(0, 10).map(recipe => `
+      <div class="dropdown-item" data-select-slug="${recipe.slug}" data-select-title="${escapeHtml(recipe.title)}">
+        ${recipe.image ? `<img src="${recipe.image}" alt="${escapeHtml(recipe.title)}">` : `<div class="dropdown-img-placeholder">🍳</div>`}
+        <div class="dropdown-item-text">
+          <strong>${escapeHtml(recipe.title)}</strong>
+          <span class="muted">${escapeHtml(recipe.categorySlug || "")} • ⏱ ${recipe.totalTimeMinutes} min</span>
         </div>
-      `;
-    }).join("");
+      </div>
+    `).join("");
     mainSearchDropdown.classList.remove("hidden");
   }
 
-  // Wyszukiwarka przepisów w planerze
+  // Wyszukiwarka w planerze (podobnie jak główna)
   const searchInput = $("#mealRecipeSearch");
   const dropdown = $("#mealRecipeDropdown");
   const hiddenInput = $("#mealRecipe");
@@ -1662,32 +1641,20 @@ async function init() {
     searchInput.addEventListener("input", async () => {
       const term = searchInput.value.toLowerCase().trim();
       const recipes = await getAllRecipes();
-      if (!term) {
-        renderDropdownItems(recipes);
-        hiddenInput.value = "";
-        return;
-      }
-      const filtered = recipes.filter(r =>
-        r.title.toLowerCase().includes(term) ||
-        (r.description && r.description.toLowerCase().includes(term))
-      );
+      if (!term) { renderDropdownItems(recipes); hiddenInput.value = ""; return; }
+      const filtered = recipes.filter(r => r.title.toLowerCase().includes(term));
       renderDropdownItems(filtered);
     });
 
-    // Zamykanie listy po kliknięciu poza wyszukiwarką
     document.addEventListener("click", (e) => {
-      if (!e.target.closest(".searchable-select-container")) {
-        dropdown.classList.add("hidden");
-      }
+      if (!e.target.closest(".searchable-select-container")) dropdown.classList.add("hidden");
     });
 
     dropdown.addEventListener("click", (e) => {
       const item = e.target.closest(".dropdown-item");
       if (item && !item.classList.contains("empty")) {
-        const id = item.dataset.selectId;
-        const title = item.dataset.selectTitle;
-        searchInput.value = title;
-        hiddenInput.value = id;
+        searchInput.value = item.dataset.selectTitle;
+        hiddenInput.value = item.dataset.selectId;
         dropdown.classList.add("hidden");
       }
     });
@@ -1695,32 +1662,30 @@ async function init() {
 
   function renderDropdownItems(recipes) {
     if (!recipes.length) {
-      dropdown.innerHTML = `<div class="dropdown-item empty">Brak przepisów o podanej nazwie</div>`;
+      dropdown.innerHTML = `<div class="dropdown-item empty">Brak przepisów</div>`;
       dropdown.classList.remove("hidden");
       return;
     }
-    dropdown.innerHTML = recipes.slice(0, 10).map(recipe => {
-      const img = recipe.image || "";
-      return `
-        <div class="dropdown-item" data-select-id="${recipe.id}" data-select-title="${escapeHtml(recipe.title)}">
-          ${img ? `<img src="${img}" alt="${escapeHtml(recipe.title)}">` : `<div style="width:32px; height:32px; background:var(--accent-light); border-radius:4px; display:grid; place-items:center; font-size:12px; color:var(--accent);">🍳</div>`}
-          <div class="dropdown-item-text">
-            <strong>${escapeHtml(recipe.title)}</strong>
-            <span class="muted">${escapeHtml(recipe.categorySlug || "")} • ⏱ ${recipe.totalTimeMinutes} min</span>
-          </div>
+    dropdown.innerHTML = recipes.slice(0, 10).map(recipe => `
+      <div class="dropdown-item" data-select-id="${recipe.id}" data-select-title="${escapeHtml(recipe.title)}">
+        ${recipe.image ? `<img src="${recipe.image}" alt="${escapeHtml(recipe.title)}">` : `<div class="dropdown-img-placeholder">🍳</div>`}
+        <div class="dropdown-item-text">
+          <strong>${escapeHtml(recipe.title)}</strong>
+          <span class="muted">${escapeHtml(recipe.categorySlug || "")} • ⏱ ${recipe.totalTimeMinutes} min</span>
         </div>
-      `;
-    }).join("");
+      </div>
+    `).join("");
     dropdown.classList.remove("hidden");
   }
 
+  // Wstępne ładowanie danych
   await loadCategories();
   await loadRecipes();
   await loadPrivatePanels();
   await loadAdminPanel();
   
-  // Run router once to load correct initial view
   handleRoute();
 }
 
+// Uruchomienie aplikacji
 init().catch((err) => toast(err.message));

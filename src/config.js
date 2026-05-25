@@ -1,11 +1,17 @@
+/**
+ * Modul konfiguracyjny aplikacji.
+ * Odpowiada za ladowanie zmiennych srodowiskowych z pliku .env
+ * oraz ich walidacje pod katem wymaganych pol.
+ */
 const path = require("path");
 require("dotenv").config();
 
+// Lista wymaganych zmiennych srodowiskowych
 const required = ["MONGODB_URI", "JWT_SECRET"];
 
 for (const key of required) {
   if (!process.env[key]) {
-    throw new Error(`Missing required environment variable: ${key}`);
+    throw new Error(`Brak wymaganej zmiennej srodowiskowej: ${key}`);
   }
 }
 
