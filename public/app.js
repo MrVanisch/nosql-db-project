@@ -6,6 +6,9 @@ const state = {
   selectedRecipe: null,
   shoppingLists: [],
   authMode: "login",
+  page: 1,
+  pages: 1,
+  lastParams: new URLSearchParams(),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -74,11 +77,16 @@ async function loadCategories() {
 }
 
 async function loadRecipes(params = new URLSearchParams()) {
-  params.set("limit", "24");
+  state.lastParams = new URLSearchParams(params);
+  state.page = Number(params.get("page") || 1);
+  params.set("page", String(state.page));
+  params.set("limit", "48");
   const data = await api(`/recipes?${params.toString()}`);
   state.recipes = data.items;
+  state.pages = data.pages || 1;
   $("#resultCount").textContent = `${data.total} przepisów`;
   renderRecipes();
+  renderPagination();
   renderRecipeSelect();
 }
 
@@ -109,6 +117,30 @@ function renderRecipes() {
       </div>
     </article>
   `).join("");
+}
+
+function renderPagination() {
+  const node = $("#pagination");
+  if (!node || state.pages <= 1) {
+    if (node) node.innerHTML = "";
+    return;
+  }
+
+  const prevDisabled = state.page <= 1 ? "disabled" : "";
+  const nextDisabled = state.page >= state.pages ? "disabled" : "";
+  const start = Math.max(1, state.page - 2);
+  const end = Math.min(state.pages, start + 4);
+  const buttons = [];
+
+  for (let page = start; page <= end; page += 1) {
+    buttons.push(`<button class="page-btn ${page === state.page ? "active" : ""}" data-page="${page}">${page}</button>`);
+  }
+
+  node.innerHTML = `
+    <button class="page-btn" data-page="${state.page - 1}" ${prevDisabled}>Poprzednia</button>
+    ${buttons.join("")}
+    <button class="page-btn" data-page="${state.page + 1}" ${nextDisabled}>Nastepna</button>
+  `;
 }
 
 async function openRecipe(slug) {
@@ -402,6 +434,16 @@ document.addEventListener("click", async (event) => {
   const favorite = event.target.closest("[data-favorite]");
   const shopping = event.target.closest("[data-shopping]");
   const rate = event.target.closest("[data-rate]");
+  const page = event.target.closest("[data-page]");
+
+  if (page) {
+    const nextPage = Number(page.dataset.page);
+    if (!Number.isFinite(nextPage) || nextPage < 1 || nextPage > state.pages) return;
+    const params = new URLSearchParams(state.lastParams);
+    params.set("page", String(nextPage));
+    await loadRecipes(params);
+    location.hash = "home";
+  }
   
   if (open) openRecipe(open.dataset.open).catch((err) => toast(err.message));
   
@@ -419,7 +461,7 @@ document.addEventListener("click", async (event) => {
   if (shopping) {
     if (!requireLogin()) return;
     try {
-      await api(`/recipes/${shopping.dataset-shopping || shopping.dataset.shopping}/shopping-list`, { 
+      await api(`/recipes/${shopping.dataset.shopping}/shopping-list`, {
         method: "POST", 
         body: JSON.stringify({ servings: state.selectedRecipe.servings || 2 }) 
       });

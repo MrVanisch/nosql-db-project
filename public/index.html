@@ -40,6 +40,11 @@
           <p class="eyebrow">NoSQL recipes app</p>
           <h1>Przepisy, zakupy i plan posilkow w jednym szybkim panelu</h1>
           <p class="hero-copy">Wyszukuj po skladnikach, czasie, tagach i diecie. Zapisuj ulubione przepisy, generuj liste zakupow i planuj posilki bez przeladowywania strony.</p>
+          <div class="hero-stats" aria-label="Statystyki aplikacji">
+            <div><strong>200+</strong><span>przepisow w bazie</span></div>
+            <div><strong>8</strong><span>kategorii</span></div>
+            <div><strong>1 klik</strong><span>lista zakupow</span></div>
+          </div>
           <form id="searchForm" class="search-panel">
             <div class="search-row">
               <label>
@@ -79,6 +84,7 @@
           <span id="resultCount" class="muted"></span>
         </div>
         <div id="recipeGrid" class="recipe-grid"></div>
+        <div id="pagination" class="pagination"></div>
       </section>
 
       <section id="recipeDetails" class="section detail-shell hidden"></section>

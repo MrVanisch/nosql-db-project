@@ -12,7 +12,7 @@
     "dev": "node --watch src/server.js",
     "seed": "node src/seed.js",
     "db:check": "node src/check-db.js",
-    "test": "node --check src/server.js && node --check src/routes.js && node --check src/seed.js && node -e \"require('./src/server').createApp(); console.log('http app ok')\""
+    "test": "node --check src/server.js && node --check src/routes.js && node --check src/seed.js && node --check public/app.js && node -e \"require('./src/server').createApp(); console.log('http app ok')\""
   },
   "repository": {
     "type": "git",

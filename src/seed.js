@@ -7,6 +7,10 @@ const categories = [
   { name: "Obiady", slug: "obiady", description: "Dania glowne na co dzien", order: 20, isActive: true },
   { name: "Desery", slug: "desery", description: "Slodkie przepisy i wypieki", order: 30, isActive: true },
   { name: "Wegetarianskie", slug: "wegetarianskie", description: "Bez miesa, pelne smaku", order: 40, isActive: true },
+  { name: "Zupy", slug: "zupy", description: "Kremy, buliony i sycace zupy", order: 50, isActive: true },
+  { name: "Salatki", slug: "salatki", description: "Lekkie miski i salatki na kazda pore", order: 60, isActive: true },
+  { name: "Kolacje", slug: "kolacje", description: "Szybkie dania na wieczor", order: 70, isActive: true },
+  { name: "Przekaski", slug: "przekaski", description: "Male porcje, pasty i dodatki", order: 80, isActive: true },
 ];
 
 const images = {
@@ -14,6 +18,10 @@ const images = {
   obiady: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80",
   desery: "https://images.unsplash.com/photo-1488477181946-6428a0291777?auto=format&fit=crop&w=1200&q=80",
   wegetarianskie: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=1200&q=80",
+  zupy: "https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=1200&q=80",
+  salatki: "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=1200&q=80",
+  kolacje: "https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1200&q=80",
+  przekaski: "https://images.unsplash.com/photo-1541014741259-de529411b96a?auto=format&fit=crop&w=1200&q=80",
 };
 
 const recipes = [
@@ -172,6 +180,89 @@ const recipes = [
   },
 ];
 
+const recipeTemplates = [
+  { categorySlug: "sniadania", base: "Jajecznica", main: "jajka", unit: "szt", tags: ["sniadanie", "bialko"], diets: ["high-protein"], image: "sniadania" },
+  { categorySlug: "sniadania", base: "Owsianka", main: "platki owsiane", unit: "g", tags: ["owsianka", "szybkie"], diets: ["vegetarian"], image: "sniadania" },
+  { categorySlug: "sniadania", base: "Tosty", main: "chleb pelnoziarnisty", unit: "g", tags: ["tosty", "sniadanie"], diets: ["vegetarian"], image: "sniadania" },
+  { categorySlug: "obiady", base: "Kurczak", main: "piers z kurczaka", unit: "g", tags: ["kurczak", "obiad"], diets: ["high-protein"], image: "obiady" },
+  { categorySlug: "obiady", base: "Makaron", main: "makaron", unit: "g", tags: ["makaron", "obiad"], diets: ["family"], image: "obiady" },
+  { categorySlug: "obiady", base: "Ryba", main: "filet z dorsza", unit: "g", tags: ["ryba", "fit"], diets: ["high-protein"], image: "obiady" },
+  { categorySlug: "wegetarianskie", base: "Curry warzywne", main: "ciecierzyca", unit: "g", tags: ["curry", "wegetarianskie"], diets: ["vegetarian"], image: "wegetarianskie" },
+  { categorySlug: "wegetarianskie", base: "Kasza z warzywami", main: "kasza gryczana", unit: "g", tags: ["kasza", "warzywa"], diets: ["vegetarian"], image: "wegetarianskie" },
+  { categorySlug: "zupy", base: "Krem z warzyw", main: "marchew", unit: "g", tags: ["zupa", "krem"], diets: ["vegetarian"], image: "zupy" },
+  { categorySlug: "zupy", base: "Rosol domowy", main: "udko z kurczaka", unit: "g", tags: ["zupa", "klasyk"], diets: ["family"], image: "zupy" },
+  { categorySlug: "salatki", base: "Salatka", main: "mix salat", unit: "g", tags: ["salatka", "lekko"], diets: ["vegetarian"], image: "salatki" },
+  { categorySlug: "salatki", base: "Bowl", main: "komosa ryzowa", unit: "g", tags: ["bowl", "fit"], diets: ["vegetarian"], image: "salatki" },
+  { categorySlug: "kolacje", base: "Wrap", main: "tortilla", unit: "szt", tags: ["kolacja", "szybkie"], diets: ["family"], image: "kolacje" },
+  { categorySlug: "kolacje", base: "Zapiekanka", main: "ziemniaki", unit: "g", tags: ["kolacja", "zapiekanka"], diets: ["family"], image: "kolacje" },
+  { categorySlug: "przekaski", base: "Pasta kanapkowa", main: "twarog", unit: "g", tags: ["przekaska", "pasta"], diets: ["vegetarian"], image: "przekaski" },
+  { categorySlug: "przekaski", base: "Hummus", main: "ciecierzyca", unit: "g", tags: ["hummus", "dip"], diets: ["vegetarian"], image: "przekaski" },
+  { categorySlug: "desery", base: "Ciasto", main: "maka pszenna", unit: "g", tags: ["deser", "ciasto"], diets: ["vegetarian"], image: "desery" },
+  { categorySlug: "desery", base: "Mus", main: "czekolada", unit: "g", tags: ["deser", "czekolada"], diets: ["vegetarian"], image: "desery" },
+];
+
+const variants = [
+  "z pomidorami", "z bazylia", "z pieczarkami", "z papryka", "z cukinia", "z brokulami",
+  "z feta", "z koperkiem", "z sosem jogurtowym", "z pesto", "z imbirem", "z orzechami",
+  "z awokado", "z kukurydza", "z fasola", "z rukola", "z serem", "z curry",
+  "z czosnkiem", "z suszonymi pomidorami", "z ryzem", "z kasza", "z cytryna", "z chili",
+];
+
+const sideIngredients = [
+  ["cebula", 1, "szt"],
+  ["czosnek", 2, "zabki"],
+  ["oliwa", 2, "lyzki"],
+  ["sol", 1, "szczypta"],
+  ["pieprz", 1, "szczypta"],
+  ["natka pietruszki", 1, "garsc"],
+];
+
+function generateRecipeCatalog(size = 216) {
+  return Array.from({ length: size }, (_, index) => {
+    const template = recipeTemplates[index % recipeTemplates.length];
+    const variant = variants[Math.floor(index / recipeTemplates.length) % variants.length];
+    const serial = String(index + 1).padStart(3, "0");
+    const prepTimeMinutes = 5 + (index % 6) * 5;
+    const cookTimeMinutes = template.categorySlug === "desery" ? 20 + (index % 5) * 5 : 10 + (index % 7) * 4;
+    const servings = 1 + (index % 6);
+    const calories = 220 + (index % 13) * 35;
+    const protein = 8 + (index % 11) * 3;
+    const fat = 6 + (index % 9) * 2;
+    const carbs = 18 + (index % 12) * 5;
+    const difficulty = index % 9 === 0 ? "hard" : index % 3 === 0 ? "medium" : "easy";
+    const extra = sideIngredients[index % sideIngredients.length];
+
+    return {
+      categorySlug: template.categorySlug,
+      title: `${template.base} ${variant} ${serial}`,
+      description: `Sprawdzony przepis na ${template.base.toLowerCase()} ${variant}, przygotowany z prostych skladnikow i opisany krok po kroku.`,
+      ingredients: [
+        [template.main, template.unit === "szt" ? 2 + (index % 4) : 120 + (index % 6) * 40, template.unit],
+        extra,
+        ["przyprawy", 1, "lyzeczka"],
+        ["woda lub bulion", 150 + (index % 4) * 50, "ml"],
+      ],
+      steps: [
+        "Przygotuj wszystkie skladniki i odmierz potrzebne porcje.",
+        `Polacz skladniki bazowe, aby powstal aromatyczny przepis: ${template.base.toLowerCase()} ${variant}.`,
+        "Gotuj, piecz albo smaz do uzyskania odpowiedniej konsystencji.",
+        "Dopraw do smaku i podawaj od razu po przygotowaniu.",
+      ],
+      tags: [...template.tags, makeSlug(variant), difficulty],
+      diets: template.diets,
+      prepTimeMinutes,
+      cookTimeMinutes,
+      servings,
+      difficulty,
+      nutrition: { calories, protein, fat, carbs },
+      ratingAvg: Math.round((3.8 + (index % 12) * 0.1) * 10) / 10,
+      ratingCount: 5 + (index % 90),
+      favoriteCount: 8 + (index % 130),
+      imageKey: template.image,
+    };
+  });
+}
+
 async function run() {
   const db = await connectDb();
   const createdAt = now();
@@ -194,7 +285,9 @@ async function run() {
   await db.collection("users").updateOne({ email: admin.email }, { $setOnInsert: admin }, { upsert: true });
   const user = await db.collection("users").findOne({ email: admin.email });
 
-  for (const item of recipes) {
+  const allRecipes = [...recipes, ...generateRecipeCatalog(216)];
+
+  for (const item of allRecipes) {
     const category = await db.collection("categories").findOne({ slug: item.categorySlug });
     const document = {
       authorId: user._id,
@@ -208,7 +301,7 @@ async function run() {
       steps: item.steps.map((instruction, index) => ({ order: index + 1, instruction, durationMinutes: index === 0 ? 8 : 5 })),
       tags: item.tags.map(makeSlug),
       diets: item.diets.map(makeSlug),
-      images: [{ url: images[item.categorySlug], alt: item.title, isMain: true }],
+      images: [{ url: images[item.imageKey || item.categorySlug], alt: item.title, isMain: true }],
       nutrition: item.nutrition,
       prepTimeMinutes: item.prepTimeMinutes,
       cookTimeMinutes: item.cookTimeMinutes,
@@ -233,7 +326,7 @@ async function run() {
     }
   }
 
-  console.log("Seed zakonczony. Demo login: admin@example.com");
+  console.log(`Seed zakonczony. Przepisy w seedzie: ${allRecipes.length}. Demo login: admin@example.com`);
   if (!process.env.DEMO_ADMIN_PASSWORD) {
     console.log(`Wygenerowane haslo demo dla nowej bazy: ${demoPassword}`);
     console.log("Zapisz je lokalnie. Nie commituj hasel do repozytorium.");
