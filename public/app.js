@@ -125,18 +125,19 @@ async function loadAdminPanel() {
     if (panelNode) panelNode.innerHTML = `<div class="admin-empty">Ladowanie panelu administratora...</div>`;
     
     // Równoległe pobieranie danych admina
-    const [summary, users, comments, recipes] = await Promise.all([
+    const [summary, users, comments, recipes, reports] = await Promise.all([
       api("/admin/summary"),
       api("/admin/users?limit=30"),
       api("/admin/comments?limit=30"),
       api("/admin/recipes?limit=30"),
+      api("/admin/reports"),
     ]);
     
     if (!summary?.stats) {
       throw new Error("Endpoint /api/admin/summary nie zwrocil statystyk. Zrestartuj serwer aplikacji.");
     }
     
-    state.adminData = { summary, users, comments, recipes };
+    state.adminData = { summary, users, comments, recipes, reports };
     renderAdminStats(summary.stats);
     renderAdminPanel();
   } catch (err) {
@@ -190,6 +191,7 @@ function renderAdminPanel() {
   const usersData = { items: [], total: 0, ...state.adminData.users };
   const commentsData = { items: [], total: 0, ...state.adminData.comments };
   const recipesData = { items: [], total: 0, ...state.adminData.recipes };
+  const reportsData = { items: [], ...state.adminData.reports };
   const summaryData = { topRecipes: [], newestUsers: [], newestComments: [], ...state.adminData.summary };
   
   if (state.adminTab === "users") {
@@ -210,6 +212,29 @@ function renderAdminPanel() {
             </div>
           </div>
         `).join("")}
+      </div>
+    `;
+    return;
+  }
+
+  if (state.adminTab === "reports") {
+    panel.innerHTML = `
+      <div class="admin-table-head"><h3>Zgloszenia</h3><span>${reportsData.items.length} spraw</span></div>
+      <div class="admin-table">
+        ${reportsData.items.map((report) => `
+          <div class="admin-row comment-row">
+            <div>
+              <strong>${escapeHtml(report.reason || "Zgloszenie")}</strong>
+              <p>Przepis: ${escapeHtml(String(report.recipeId || ""))}</p>
+            </div>
+            <span class="status-pill ${report.status === "new" ? "danger" : ""}">${report.status || "new"}</span>
+            <div class="admin-actions">
+              <button class="btn small secondary" data-admin-report="${report._id}" data-status="in_review">Sprawdzane</button>
+              <button class="btn small secondary" data-admin-report="${report._id}" data-status="resolved">Rozwiazane</button>
+              <button class="btn small danger" data-admin-report="${report._id}" data-status="rejected">Odrzuc</button>
+            </div>
+          </div>
+        `).join("") || `<div class="admin-empty">Brak zgloszen.</div>`}
       </div>
     `;
     return;
@@ -253,6 +278,7 @@ function renderAdminPanel() {
               <button class="btn small secondary" data-admin-recipe="${recipe._id}" data-status="published">Publikuj</button>
               <button class="btn small secondary" data-admin-recipe="${recipe._id}" data-status="hidden">Ukryj</button>
               <button class="btn small danger" data-admin-recipe="${recipe._id}" data-status="draft">Szkic</button>
+              <button class="btn small danger" data-admin-delete-recipe="${recipe._id}" data-title="${escapeHtml(recipe.title)}">Usun</button>
             </div>
           </div>
         `).join("")}
@@ -377,6 +403,34 @@ function renderPagination() {
  * Pobiera szczegóły przepisu po slugu i renderuje widok pełnoekranowy.
  * @param {string} slug - Unikalny identyfikator przyjazny dla URL.
  */
+function canManageComment(comment) {
+  if (!state.user) return false;
+  const commentUserId = String(comment.userId || "");
+  return state.user.role === "admin" || commentUserId === state.user.id;
+}
+
+function renderRecipeComments(comments = []) {
+  if (!comments.length) return "<p class='muted'>Brak komentarzy. Badz pierwszy!</p>";
+  return comments.map((comment) => {
+    const author = comment.userSnapshot?.displayName || comment.userSnapshot?.username || "Uzytkownik";
+    const actions = canManageComment(comment)
+      ? `<div class="comment-actions">
+          <button class="btn small secondary" type="button" data-edit-comment="${comment._id}">Edytuj</button>
+          <button class="btn small danger" type="button" data-delete-comment="${comment._id}">Usun</button>
+        </div>`
+      : "";
+    return `
+      <div class="list-item comment-item">
+        <div class="comment-body">
+          <strong>${escapeHtml(author)}</strong>
+          <p>${escapeHtml(comment.body)}</p>
+        </div>
+        ${actions}
+      </div>
+    `;
+  }).join("");
+}
+
 async function openRecipe(slug) {
   if (!slug) return;
   const data = await api(`/recipes/${slug}`);
@@ -456,6 +510,7 @@ async function openRecipe(slug) {
       </aside>
     </div>
   `;
+  $("#comments").innerHTML = renderRecipeComments(data.comments);
 }
 
 // Lokalny cache dla wszystkich przepisów (używany do autouzupełniania wyszukiwania)
@@ -1112,6 +1167,38 @@ document.addEventListener("click", async (event) => {
   const clearCalendarFilter = event.target.closest("#clearCalendarFilter");
   const editShoppingItemBtn = event.target.closest("[data-edit-shopping-item]");
   const deleteShoppingItemBtn = event.target.closest("[data-delete-shopping-item]");
+  const editCommentBtn = event.target.closest("[data-edit-comment]");
+  const deleteCommentBtn = event.target.closest("[data-delete-comment]");
+
+  if (editCommentBtn) {
+    const existing = state.selectedRecipe ? Array.from(document.querySelectorAll("[data-edit-comment]")).find((btn) => btn.dataset.editComment === editCommentBtn.dataset.editComment) : null;
+    const currentText = existing?.closest(".comment-item")?.querySelector(".comment-body p")?.textContent || "";
+    const body = prompt("Edytuj komentarz:", currentText);
+    if (body === null) return;
+    try {
+      await api(`/comments/${editCommentBtn.dataset.editComment}`, {
+        method: "PATCH",
+        body: JSON.stringify({ body: body.trim() }),
+      });
+      toast("Komentarz zostal zaktualizowany");
+      await openRecipe(state.selectedRecipe.slug);
+    } catch (err) {
+      toast(err.message);
+    }
+    return;
+  }
+
+  if (deleteCommentBtn) {
+    if (!confirm("Usunac ten komentarz?")) return;
+    try {
+      await api(`/comments/${deleteCommentBtn.dataset.deleteComment}`, { method: "DELETE" });
+      toast("Komentarz zostal usuniety");
+      await openRecipe(state.selectedRecipe.slug);
+    } catch (err) {
+      toast(err.message);
+    }
+    return;
+  }
 
   if (editShoppingItemBtn) {
     event.stopPropagation();
@@ -1277,6 +1364,26 @@ document.addEventListener("click", async (event) => {
     await loadAdminPanel();
     await loadRecipes(state.lastParams);
     toast("Status przepisu zostal zmieniony");
+  }
+
+  const adminDeleteRecipe = event.target.closest("[data-admin-delete-recipe]");
+  if (adminDeleteRecipe) {
+    const title = adminDeleteRecipe.dataset.title || "ten przepis";
+    if (!confirm(`Usunac przepis "${title}" z aplikacji?`)) return;
+    await api(`/admin/recipes/${adminDeleteRecipe.dataset.adminDeleteRecipe}`, { method: "DELETE" });
+    await loadAdminPanel();
+    await loadRecipes(state.lastParams);
+    toast("Przepis zostal usuniety");
+  }
+
+  const adminReport = event.target.closest("[data-admin-report]");
+  if (adminReport) {
+    await api(`/admin/reports/${adminReport.dataset.adminReport}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: adminReport.dataset.status }),
+    });
+    await loadAdminPanel();
+    toast("Status zgloszenia zostal zmieniony");
   }
 });
 

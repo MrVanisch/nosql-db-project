@@ -149,6 +149,47 @@ async function recalculateRating(db, recipeId) {
   );
 }
 
+/**
+ * Przelicza licznik widocznych komentarzy dla przepisu bez zgadywania roznicy.
+ * Uzywamy countDocuments po kazdej zmianie statusu komentarza, bo komentarze sa
+ * soft-delete i administrator moze przelaczac status w obie strony.
+ */
+async function recalculateCommentCount(db, recipeId) {
+  const count = await db.collection("comments").countDocuments({ recipeId, status: "visible" });
+  await db.collection("recipes").updateOne(
+    { _id: recipeId },
+    { $set: { commentCount: count, updatedAt: now() } },
+  );
+}
+
+/**
+ * Uzupelnia starsze komentarze o podstawowe dane przepisu.
+ * Nowe komentarze maja recipeSnapshot, ale w istniejacej bazie czesc rekordow
+ * moze go nie miec, dlatego robimy jeden zbiorczy odczyt po _id z operatorem $in.
+ */
+async function attachRecipeSnapshots(db, comments) {
+  const missingRecipeIds = [...new Set(
+    comments
+      .filter((comment) => !comment.recipeSnapshot?.title && comment.recipeId)
+      .map((comment) => comment.recipeId),
+  )];
+  if (!missingRecipeIds.length) return comments;
+
+  const recipes = await db.collection("recipes")
+    .find({ _id: { $in: missingRecipeIds } }, { projection: { title: 1, slug: 1 } })
+    .toArray();
+  const recipeMap = new Map(recipes.map((recipe) => [recipe._id.toString(), recipe]));
+
+  return comments.map((comment) => {
+    if (comment.recipeSnapshot?.title || !comment.recipeId) return comment;
+    const recipe = recipeMap.get(comment.recipeId.toString());
+    return {
+      ...comment,
+      recipeSnapshot: recipe ? { title: recipe.title, slug: recipe.slug } : { title: "Usuniety przepis", slug: "" },
+    };
+  });
+}
+
 // --- TRASY PUBLICZNE & SYSTEMOWE ---
 
 /** Sprawdzenie stanu usługi */
@@ -466,8 +507,14 @@ router.get("/recipes/:recipeId/comments", asyncHandler(async (req, res) => {
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.min(50, Math.max(1, Number(req.query.limit || 10)));
-  const items = await getDb().collection("comments").find({ recipeId, status: "visible" }).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray();
-  res.json({ items, page, limit });
+  const db = getDb();
+  // MongoDB: odczytujemy tylko widoczne komentarze dla danego przepisu.
+  // Sort i paginacja zostaja wykonane po stronie bazy, a nie w pamieci aplikacji.
+  const [items, total] = await Promise.all([
+    db.collection("comments").find({ recipeId, status: "visible" }).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
+    db.collection("comments").countDocuments({ recipeId, status: "visible" }),
+  ]);
+  res.json({ items, page, limit, total, pages: Math.ceil(total / limit) });
 }));
 
 /** Dodanie komentarza z atomową inkrementacją licznika */
@@ -475,10 +522,18 @@ router.post("/recipes/:recipeId/comments", requireAuth, asyncHandler(async (req,
   const recipeId = oid(req.params.recipeId);
   if (!recipeId) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
   const { body } = parse(z.object({ body: z.string().trim().min(2).max(1000) }), req.body);
+  const db = getDb();
+  // MongoDB: sprawdzamy, czy komentarz trafia do publicznego przepisu.
+  const recipe = await db.collection("recipes").findOne(
+    { _id: recipeId, status: "published" },
+    { projection: { title: 1, slug: 1 } },
+  );
+  if (!recipe) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono przepisu");
   const comment = {
     recipeId,
     userId: req.user._id,
     userSnapshot: { username: req.user.username, displayName: req.user.profile?.displayName || req.user.username },
+    recipeSnapshot: { title: recipe.title, slug: recipe.slug },
     body,
     status: "visible",
     createdAt: now(),
@@ -486,9 +541,9 @@ router.post("/recipes/:recipeId/comments", requireAuth, asyncHandler(async (req,
   };
 
   // 1. Zapis komentarza
-  await getDb().collection("comments").insertOne(comment);
+  await db.collection("comments").insertOne(comment);
   // 2. Atomowe zwiększenie licznika komentarzy w dokumencie przepisu ($inc)
-  await getDb().collection("recipes").updateOne({ _id: recipeId }, { $inc: { commentCount: 1 }, $set: { updatedAt: now() } });
+  await db.collection("recipes").updateOne({ _id: recipeId }, { $inc: { commentCount: 1 }, $set: { updatedAt: now() } });
   res.status(201).json({ item: comment });
 }));
 
@@ -500,6 +555,7 @@ router.patch("/comments/:id", requireAuth, asyncHandler(async (req, res) => {
   if (!comment) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono komentarza");
   if (!comment.userId.equals(req.user._id) && req.user.role !== "admin") return errorResponse(res, 403, "FORBIDDEN", "Mozesz edytowac tylko wlasne komentarze");
   const { body } = parse(z.object({ body: z.string().trim().min(2).max(1000) }), req.body);
+  // MongoDB: aktualizujemy wylacznie tresc i znacznik czasu, bez zmiany wlasciciela.
   await getDb().collection("comments").updateOne({ _id: id }, { $set: { body, updatedAt: now() } });
   res.json({ ok: true });
 }));
@@ -514,8 +570,7 @@ router.delete("/comments/:id", requireAuth, asyncHandler(async (req, res) => {
   
   // Zmiana statusu zamiast fizycznego usunięcia (soft delete)
   await getDb().collection("comments").updateOne({ _id: id }, { $set: { status: "deleted", updatedAt: now() } });
-  // Atomowe zmniejszenie licznika ($inc: -1)
-  await getDb().collection("recipes").updateOne({ _id: comment.recipeId }, { $inc: { commentCount: -1 } });
+  await recalculateCommentCount(getDb(), comment.recipeId);
   res.json({ ok: true });
 }));
 
@@ -660,7 +715,9 @@ router.patch("/me/shopping-lists/:id", requireAuth, asyncHandler(async (req, res
     items: z.array(z.object({ name: z.string().trim().min(2), quantity: z.coerce.number().min(0), unit: z.string().trim().min(1), checked: z.boolean().default(false) })).optional(),
   });
   const data = parse(schema, req.body);
-  await getDb().collection("shoppingLists").updateOne({ _id: id, userId: req.user._id }, { $set: { ...data, updatedAt: now() } });
+  // MongoDB: filtr zawiera userId, wiec uzytkownik moze modyfikowac tylko wlasna liste.
+  const result = await getDb().collection("shoppingLists").updateOne({ _id: id, userId: req.user._id }, { $set: { ...data, updatedAt: now() } });
+  if (!result.matchedCount) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono listy zakupow");
   res.json({ ok: true });
 }));
 
@@ -668,7 +725,9 @@ router.patch("/me/shopping-lists/:id", requireAuth, asyncHandler(async (req, res
 router.delete("/me/shopping-lists/:id", requireAuth, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
-  await getDb().collection("shoppingLists").deleteOne({ _id: id, userId: req.user._id });
+  // MongoDB: deleteOne z userId chroni cudze listy przed usunieciem.
+  const result = await getDb().collection("shoppingLists").deleteOne({ _id: id, userId: req.user._id });
+  if (!result.deletedCount) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono listy zakupow");
   res.json({ ok: true });
 }));
 
@@ -839,7 +898,9 @@ router.patch("/admin/users/:id", requireAdmin, asyncHandler(async (req, res) => 
     status: z.enum(["active", "blocked"]).optional(),
   });
   const data = parse(schema, req.body);
-  await getDb().collection("users").updateOne({ _id: id }, { $set: { ...data, updatedAt: now() } });
+  // MongoDB: aktualizujemy tylko dozwolone pola z walidacji Zod.
+  const result = await getDb().collection("users").updateOne({ _id: id }, { $set: { ...data, updatedAt: now() } });
+  if (!result.matchedCount) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono uzytkownika");
   res.json({ ok: true });
 }));
 
@@ -850,11 +911,36 @@ router.get("/admin/comments", requireAdmin, asyncHandler(async (req, res) => {
   const query = {};
   if (req.query.status) query.status = req.query.status;
   if (req.query.q) query.body = { $regex: String(req.query.q).trim(), $options: "i" };
-  const [items, total] = await Promise.all([
-    getDb().collection("comments").find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
-    getDb().collection("comments").countDocuments(query),
+  const db = getDb();
+  // MongoDB: panel admina uzywa filtrowania po statusie/tresci oraz paginacji,
+  // zeby nie pobierac calej kolekcji komentarzy do przegladarki.
+  const [rawItems, total] = await Promise.all([
+    db.collection("comments").find(query).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
+    db.collection("comments").countDocuments(query),
   ]);
+  const items = await attachRecipeSnapshots(db, rawItems);
   res.json({ items, page, limit, total, pages: Math.ceil(total / limit) });
+}));
+
+/** Zmiana statusu komentarza z panelu administratora */
+router.patch("/admin/comments/:id/status", requireAdmin, asyncHandler(async (req, res) => {
+  const id = oid(req.params.id);
+  if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
+  const { status } = parse(z.object({ status: z.enum(["visible", "hidden", "deleted"]) }), req.body);
+  const db = getDb();
+
+  // MongoDB: najpierw pobieramy aktualny status, bo zmiana statusu komentarza
+  // wymaga pozniejszego przeliczenia licznika widocznych komentarzy przepisu.
+  const comment = await db.collection("comments").findOne({ _id: id });
+  if (!comment) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono komentarza");
+
+  const result = await db.collection("comments").updateOne(
+    { _id: id },
+    { $set: { status, moderatedAt: now(), moderatedBy: req.user._id, updatedAt: now() } },
+  );
+  if (!result.matchedCount) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono komentarza");
+  await recalculateCommentCount(db, comment.recipeId);
+  res.json({ ok: true });
 }));
 
 /** Zarządzanie statusami przepisów (Admin) */
@@ -877,6 +963,22 @@ router.get("/admin/reports", requireAdmin, asyncHandler(async (_req, res) => {
   res.json({ items });
 }));
 
+/** Zmiana statusu zgloszenia przez administratora */
+router.patch("/admin/reports/:id/status", requireAdmin, asyncHandler(async (req, res) => {
+  const id = oid(req.params.id);
+  if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
+  const { status } = parse(z.object({ status: z.enum(["new", "in_review", "resolved", "rejected"]) }), req.body);
+
+  // MongoDB: aktualizujemy pojedyncze zgloszenie i sprawdzamy matchedCount,
+  // aby panel admina nie pokazywal sukcesu dla nieistniejacego rekordu.
+  const result = await getDb().collection("reports").updateOne(
+    { _id: id },
+    { $set: { status, reviewedAt: now(), reviewedBy: req.user._id } },
+  );
+  if (!result.matchedCount) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono zgloszenia");
+  res.json({ ok: true });
+}));
+
 /** Zgłoszenie przepisu przez użytkownika */
 router.post("/recipes/:recipeId/reports", requireAuth, asyncHandler(async (req, res) => {
   const recipeId = oid(req.params.recipeId);
@@ -891,8 +993,26 @@ router.post("/recipes/:recipeId/reports", requireAuth, asyncHandler(async (req, 
 router.patch("/admin/recipes/:id/status", requireAdmin, asyncHandler(async (req, res) => {
   const id = oid(req.params.id);
   if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
-  const { status } = parse(z.object({ status: z.enum(["draft", "published", "hidden"]) }), req.body);
-  await getDb().collection("recipes").updateOne({ _id: id }, { $set: { status, updatedAt: now() } });
+  const { status } = parse(z.object({ status: z.enum(["draft", "published", "hidden", "deleted"]) }), req.body);
+  // MongoDB: status przepisu zmieniamy jednym updateOne, a matchedCount chroni
+  // przed cichym sukcesem, gdy rekord juz nie istnieje.
+  const result = await getDb().collection("recipes").updateOne({ _id: id }, { $set: { status, updatedAt: now() } });
+  if (!result.matchedCount) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono przepisu");
+  res.json({ ok: true });
+}));
+
+/** Usuniecie przepisu przez Admina bez kasowania powiazanych danych */
+router.delete("/admin/recipes/:id", requireAdmin, asyncHandler(async (req, res) => {
+  const id = oid(req.params.id);
+  if (!id) return errorResponse(res, 400, "INVALID_ID", "Niepoprawne ID");
+
+  // MongoDB: robimy soft delete przez status "deleted". Dzieki temu komentarze,
+  // oceny, listy zakupow i plany posilkow nie traca referencji do przepisu.
+  const result = await getDb().collection("recipes").updateOne(
+    { _id: id },
+    { $set: { status: "deleted", deletedAt: now(), deletedBy: req.user._id, updatedAt: now() } },
+  );
+  if (!result.matchedCount) return errorResponse(res, 404, "NOT_FOUND", "Nie znaleziono przepisu");
   res.json({ ok: true });
 }));
 

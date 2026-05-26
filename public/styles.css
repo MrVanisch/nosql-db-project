@@ -702,6 +702,29 @@ input:focus, select:focus, textarea:focus {
   gap: 12px;
   margin-bottom: 20px;
 }
+
+.comment-item {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.comment-body {
+  flex: 1;
+}
+
+.comment-body p {
+  margin: 4px 0 0;
+  font-size: 15px;
+  color: #2c3531;
+}
+
+.comment-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 #commentForm {
   background: var(--bg);
   padding: 16px;
@@ -1732,6 +1755,8 @@ dialog::backdrop {
   gap: 8px;
   justify-content: flex-end;
   flex-wrap: wrap;
+  justify-self: end;
+  min-width: max-content;
 }
 
 .admin-overview {
@@ -1791,7 +1816,11 @@ dialog::backdrop {
   .admin-row,
   .admin-row.comment-row,
   .admin-overview { grid-template-columns: 1fr; }
-  .admin-actions { justify-content: flex-start; }
+  .admin-actions {
+    justify-content: flex-end;
+    justify-self: stretch;
+    width: 100%;
+  }
 }
 
 @media (max-width: 880px) {
